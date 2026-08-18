@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    name: Linux package
+    needs: meta
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            libx11-dev libxtst-dev libxext-dev libxrender-dev libxfixes-dev \
+            libcairo2-dev libpango1.0-dev libdbus-1-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DAIRMOUSE_VERSION=${{ needs.meta.outputs.version }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Package
+        env:
+          VER: ${{ needs.meta.outputs.version }}
+        run: |
+          NAME="airmouse-${VER}-linux-x86_64"
+          cmake --install build --prefix "dist/${NAME}"
+          tar -C dist -czf "${NAME}.tar.gz" "${NAME}"
+          ls -lh "${NAME}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airmouse-linux-x86_64
+          path: airmouse-*-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows package
+    needs: meta
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Fetch MediaPipe
+        shell: bash
+        run: python scripts/fetch_mediapipe.py
+      - name: Generate import library
+        shell: bash
+        run: python scripts/gen_msvc_implib.py third_party/mediapipe/lib/libmediapipe.dll
+      - name: Configure
+        run: >
+          cmake -S . -B build -A x64
+          -DAIRMOUSE_FETCH_MEDIAPIPE=OFF
+          -DAIRMOUSE_VERSION=${{ needs.meta.outputs.version }}
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        env:
+          VER: ${{ needs.meta.outputs.version }}
+        shell: bash
+        run: |
+          NAME="airmouse-${VER}-windows-x64"
+          cmake --install build --config Release --prefix "dist/${NAME}"
+          (cd dist && powershell -Command "Compress-Archive -Path '${NAME}' -DestinationPath '../${NAME}.zip'")
+          ls -lh "${NAME}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airmouse-windows-x64
+          path: airmouse-*-windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    name: GitHub Release
+    needs: [meta, linux, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: find artifacts -type f -ls
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/airmouse-*-linux-x86_64.tar.gz
+            artifacts/airmouse-*-windows-x64.zip
+          fail_on_unmatched_files: true

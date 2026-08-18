@@ -36,3 +36,19 @@ sudo usermod -aG input "$USER"
 ```
 
 Config lives at `~/.config/airmouse/config.json`.
+
+## Releases
+
+GitHub Actions builds Linux and Windows packages on every `v*` tag (and on demand via **Actions → Release → Run workflow**).
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That publishes:
+
+- `airmouse-<version>-linux-x86_64.tar.gz`
+- `airmouse-<version>-windows-x64.zip`
+
+CI on `main` and pull requests compiles and tests both platforms without making a GitHub Release.

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            libx11-dev libxtst-dev libxext-dev libxrender-dev libxfixes-dev \
+            libcairo2-dev libpango1.0-dev libdbus-1-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Fetch MediaPipe
+        shell: bash
+        run: python scripts/fetch_mediapipe.py
+      - name: Generate import library
+        shell: bash
+        run: python scripts/gen_msvc_implib.py third_party/mediapipe/lib/libmediapipe.dll
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DAIRMOUSE_FETCH_MEDIAPIPE=OFF
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -1,12 +1,19 @@
 cmake_minimum_required(VERSION 3.24)
 project(airmouse VERSION 0.1.0 LANGUAGES CXX)
 
+if(NOT AIRMOUSE_VERSION)
+  set(AIRMOUSE_VERSION "${PROJECT_VERSION}")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(NOT MSVC)
+if(MSVC)
+  add_compile_options(/W4 /utf-8)
+  add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE)
+else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
@@ -52,9 +59,25 @@ target_include_directories(airmouse_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mediapipe/include
 )
 
-set(MP_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mediapipe/lib/libmediapipe.so")
+set(MP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mediapipe/lib")
 if(WIN32)
-  set(MP_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mediapipe/lib/mediapipe.dll")
+  set(MP_SHARED "${MP_DIR}/libmediapipe.dll")
+  set(MP_IMPLIB "${MP_DIR}/libmediapipe.lib")
+else()
+  set(MP_SHARED "${MP_DIR}/libmediapipe.so")
+  set(MP_IMPLIB "${MP_SHARED}")
+endif()
+
+option(AIRMOUSE_FETCH_MEDIAPIPE "Download MediaPipe C library if missing" ON)
+if(AIRMOUSE_FETCH_MEDIAPIPE AND NOT EXISTS "${MP_SHARED}")
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch_mediapipe.py"
+            --dest "${MP_DIR}"
+    RESULT_VARIABLE _mp_fetch_rc)
+  if(NOT _mp_fetch_rc EQUAL 0)
+    message(WARNING "MediaPipe fetch failed (rc=${_mp_fetch_rc})")
+  endif()
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -69,18 +92,46 @@ if(UNIX AND NOT APPLE)
     ${X11_LIBRARIES} ${CAIRO_LIBRARIES} ${PANGO_LIBRARIES} ${DBUS_LIBRARIES})
 endif()
 
-if(EXISTS "${MP_LIB}")
-  target_link_libraries(airmouse_core PUBLIC "${MP_LIB}")
+if(WIN32)
+  target_link_libraries(airmouse_core PUBLIC user32)
+endif()
+
+if(WIN32 AND EXISTS "${MP_SHARED}" AND NOT EXISTS "${MP_IMPLIB}")
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_msvc_implib.py"
+              "${MP_SHARED}"
+      RESULT_VARIABLE _mp_implib_rc)
+    if(NOT _mp_implib_rc EQUAL 0)
+      message(WARNING "Could not generate MediaPipe import library")
+    endif()
+  endif()
+endif()
+
+if(EXISTS "${MP_IMPLIB}")
+  target_link_libraries(airmouse_core PUBLIC "${MP_IMPLIB}")
   set_target_properties(airmouse_core PROPERTIES
-    BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mediapipe/lib"
+    BUILD_RPATH "${MP_DIR}"
     INSTALL_RPATH "$ORIGIN/../lib"
   )
 endif()
 
 add_executable(airmouse src/airmouse/main.cpp)
+target_compile_definitions(airmouse PRIVATE AIRMOUSE_VERSION="${AIRMOUSE_VERSION}")
 target_link_libraries(airmouse PRIVATE airmouse_core)
 if(UNIX AND NOT APPLE)
   target_link_libraries(airmouse PRIVATE pthread)
+endif()
+set_target_properties(airmouse PROPERTIES
+  BUILD_RPATH "${MP_DIR}"
+  INSTALL_RPATH "$ORIGIN/../lib"
+)
+
+if(WIN32 AND EXISTS "${MP_SHARED}")
+  add_custom_command(TARGET airmouse POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${MP_SHARED}" "$<TARGET_FILE_DIR:airmouse>/libmediapipe.dll")
 endif()
 
 include(FetchContent)
@@ -90,6 +141,7 @@ FetchContent_Declare(
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 enable_testing()
@@ -103,7 +155,24 @@ add_executable(airmouse_tests
 target_link_libraries(airmouse_tests PRIVATE airmouse_core GTest::gtest_main)
 add_test(NAME airmouse_tests COMMAND airmouse_tests)
 
-install(TARGETS airmouse RUNTIME DESTINATION bin)
-install(FILES "${MP_LIB}" DESTINATION lib)
-install(DIRECTORY assets/ DESTINATION share/airmouse)
-install(FILES packaging/linux/airmouse.desktop DESTINATION share/applications)
+include(GNUInstallDirs)
+
+if(WIN32)
+  install(TARGETS airmouse RUNTIME DESTINATION .)
+  if(EXISTS "${MP_SHARED}")
+    install(FILES "${MP_SHARED}" DESTINATION .)
+  endif()
+  install(DIRECTORY assets/ DESTINATION assets)
+  install(FILES README.md LICENSE DESTINATION .)
+else()
+  install(TARGETS airmouse RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  if(EXISTS "${MP_SHARED}")
+    install(FILES "${MP_SHARED}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
+  install(DIRECTORY assets/ DESTINATION ${CMAKE_INSTALL_DATADIR}/airmouse)
+  install(FILES packaging/linux/airmouse.desktop
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+  install(FILES packaging/linux/udev/99-airmouse-uinput.rules
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/airmouse)
+  install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+endif()
