@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -46,6 +47,10 @@ class Tracker {
   std::atomic<bool> running_{false};
   std::atomic<bool> paused_{false};
   mutable std::mutex mu_;
+  std::mutex start_mu_;
+  std::condition_variable start_cv_;
+  bool start_done_ = false;
+  bool start_ok_ = false;
   TrackingSnapshot snap_{};
   std::string error_;
   int64_t last_ms_ = 0;

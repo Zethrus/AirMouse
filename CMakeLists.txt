@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(airmouse VERSION 0.1.0 LANGUAGES CXX)
+project(airmouse VERSION 0.1.2 LANGUAGES CXX)
 
 if(NOT AIRMOUSE_VERSION)
   set(AIRMOUSE_VERSION "${PROJECT_VERSION}")
@@ -29,6 +29,7 @@ set(AIRMOUSE_SOURCES
   src/airmouse/input/factory.cpp
   src/airmouse/tracking/mediapipe_landmarker.cpp
   src/airmouse/app/tracker.cpp
+  src/airmouse/ui/icon.cpp
   src/airmouse/ui/settings.cpp
   src/airmouse/platform/dbus_toggle.cpp
 )
@@ -39,6 +40,7 @@ if(WIN32)
     src/airmouse/camera/win_capture.cpp
     src/airmouse/ui/overlay_win.cpp
     src/airmouse/ui/tray_win.cpp
+    src/airmouse/ui/settings_win.cpp
     src/airmouse/platform/hotkey_win.cpp
   )
 else()
@@ -48,6 +50,7 @@ else()
     src/airmouse/camera/v4l2_capture.cpp
     src/airmouse/ui/overlay_x11.cpp
     src/airmouse/ui/tray_sni.cpp
+    src/airmouse/ui/settings_x11.cpp
     src/airmouse/platform/hotkey_x11.cpp
   )
 endif()
@@ -88,12 +91,18 @@ if(UNIX AND NOT APPLE)
   pkg_check_modules(DBUS REQUIRED dbus-1)
   pkg_check_modules(EGL REQUIRED egl)
   pkg_check_modules(GLESV2 REQUIRED glesv2)
+  pkg_check_modules(JPEG libjpeg)
   target_include_directories(airmouse_core PUBLIC
     ${X11_INCLUDE_DIRS} ${CAIRO_INCLUDE_DIRS} ${PANGO_INCLUDE_DIRS} ${DBUS_INCLUDE_DIRS}
     ${EGL_INCLUDE_DIRS} ${GLESV2_INCLUDE_DIRS})
   target_link_libraries(airmouse_core PUBLIC
     ${X11_LIBRARIES} ${CAIRO_LIBRARIES} ${PANGO_LIBRARIES} ${DBUS_LIBRARIES}
     ${EGL_LIBRARIES} ${GLESV2_LIBRARIES})
+  if(JPEG_FOUND)
+    target_compile_definitions(airmouse_core PUBLIC AIRMOUSE_HAVE_JPEG=1)
+    target_include_directories(airmouse_core PUBLIC ${JPEG_INCLUDE_DIRS})
+    target_link_libraries(airmouse_core PUBLIC ${JPEG_LIBRARIES})
+  endif()
 endif()
 
 if(WIN32)
@@ -126,6 +135,9 @@ endif()
 add_executable(airmouse src/airmouse/main.cpp)
 target_compile_definitions(airmouse PRIVATE AIRMOUSE_VERSION="${AIRMOUSE_VERSION}")
 target_link_libraries(airmouse PRIVATE airmouse_core)
+if(WIN32)
+  target_sources(airmouse PRIVATE packaging/windows/airmouse.rc)
+endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(airmouse PRIVATE pthread)
 endif()
@@ -178,6 +190,22 @@ else()
   install(DIRECTORY assets/ DESTINATION ${CMAKE_INSTALL_DATADIR}/airmouse)
   install(FILES packaging/linux/airmouse.desktop
           DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+  install(FILES assets/icons/airmouse-16.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/16x16/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-22.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/22x22/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-24.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/24x24/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-32.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/32x32/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-48.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/48x48/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-64.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/64x64/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-128.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps RENAME airmouse.png)
+  install(FILES assets/icons/airmouse-256.png
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps RENAME airmouse.png)
   install(FILES packaging/linux/udev/99-airmouse-uinput.rules
           DESTINATION lib/udev/rules.d)
   install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})

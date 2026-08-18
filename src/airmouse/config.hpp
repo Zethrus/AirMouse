@@ -30,7 +30,7 @@ struct GestureToggles {
 };
 
 struct Config {
-  int camera_index = 0;
+  int camera_index = -1;  // -1 = first real capture node
   bool mirror = true;
   int frame_width = 640;
   int frame_height = 480;

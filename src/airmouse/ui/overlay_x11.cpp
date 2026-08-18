@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
 #include "airmouse/config.hpp"
 #include "airmouse/ui/theme.hpp"
@@ -66,7 +67,7 @@ class X11Overlay final : public Overlay {
     swa.colormap = XCreateColormap(dpy_, root_, visual_, AllocNone);
     swa.background_pixel = 0;
     swa.border_pixel = 0;
-    swa.override_redirect = False;
+    swa.override_redirect = True;
     swa.event_mask = ExposureMask | StructureNotifyMask;
 
     const int sw = DisplayWidth(dpy_, screen_);
@@ -88,9 +89,9 @@ class X11Overlay final : public Overlay {
                     reinterpret_cast<unsigned char*>(states), 3);
 
     Atom type = XInternAtom(dpy_, "_NET_WM_WINDOW_TYPE", False);
-    Atom notif = XInternAtom(dpy_, "_NET_WM_WINDOW_TYPE_NOTIFICATION", False);
+    Atom utility = XInternAtom(dpy_, "_NET_WM_WINDOW_TYPE_UTILITY", False);
     XChangeProperty(dpy_, win_, type, XA_ATOM, 32, PropModeReplace,
-                    reinterpret_cast<unsigned char*>(&notif), 1);
+                    reinterpret_cast<unsigned char*>(&utility), 1);
 
     XStoreName(dpy_, win_, "AirMouse");
     XClassHint hint{};
@@ -104,6 +105,8 @@ class X11Overlay final : public Overlay {
 
     surface_ = cairo_xlib_surface_create(dpy_, win_, visual_, theme::kHudW, theme::kHudH);
     cr_ = cairo_create(surface_);
+    offscreen_ = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, theme::kHudW, theme::kHudH);
+    off_cr_ = cairo_create(offscreen_);
     load_fonts();
 
     XMapRaised(dpy_, win_);
@@ -113,6 +116,10 @@ class X11Overlay final : public Overlay {
   }
 
   void destroy() override {
+    if (off_cr_) cairo_destroy(off_cr_);
+    if (offscreen_) cairo_surface_destroy(offscreen_);
+    off_cr_ = nullptr;
+    offscreen_ = nullptr;
     if (cr_) cairo_destroy(cr_);
     if (surface_) cairo_surface_destroy(surface_);
     cr_ = nullptr;
@@ -137,6 +144,7 @@ class X11Overlay final : public Overlay {
   bool visible() const override { return visible_; }
 
   void set_snapshot(const TrackingSnapshot& snap) override {
+    if (same_snap(snap_, snap)) return;
     snap_ = snap;
     dirty_ = true;
   }
@@ -174,101 +182,127 @@ class X11Overlay final : public Overlay {
     font_sans_ = (fonts / "IBMPlexSans-Regular.ttf").string();
   }
 
+  static bool same_snap(const TrackingSnapshot& a, const TrackingSnapshot& b) {
+    if (a.camera_ok != b.camera_ok || a.pose != b.pose || a.status != b.status ||
+        a.message != b.message || a.hand.has_value() != b.hand.has_value()) {
+      return false;
+    }
+    if (std::abs(a.command.confidence - b.command.confidence) > 0.02f) return false;
+    if (a.hand && b.hand) {
+      return std::memcmp(&a.hand->landmarks, &b.hand->landmarks, sizeof(a.hand->landmarks)) == 0;
+    }
+    return true;
+  }
+
   void draw() {
-    if (!cr_) return;
+    if (!cr_ || !off_cr_) return;
+    cairo_t* cr = off_cr_;
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+    rounded_rect(cr, 0.5, 0.5, theme::kHudW - 1.0, theme::kHudH - 1.0, theme::kHudRadius);
+    set_hex(cr, theme::kVoid, theme::kHudAlpha);
+    cairo_fill_preserve(cr);
+    set_hex(cr, theme::kHair, 0.14);
+    cairo_set_line_width(cr, 1.0);
+    cairo_stroke(cr);
+
+    draw_constellation(cr);
+    draw_label(cr);
+    if (!chip_.empty()) draw_chip(cr);
+
     cairo_set_operator(cr_, CAIRO_OPERATOR_SOURCE);
-    cairo_set_source_rgba(cr_, 0, 0, 0, 0);
+    cairo_set_source_surface(cr_, offscreen_, 0, 0);
     cairo_paint(cr_);
-    cairo_set_operator(cr_, CAIRO_OPERATOR_OVER);
-
-    rounded_rect(cr_, 0.5, 0.5, theme::kHudW - 1.0, theme::kHudH - 1.0, theme::kHudRadius);
-    set_hex(cr_, theme::kVoid, theme::kHudAlpha);
-    cairo_fill_preserve(cr_);
-    set_hex(cr_, theme::kHair, 0.14);
-    cairo_set_line_width(cr_, 1.0);
-    cairo_stroke(cr_);
-
-    draw_constellation();
-    draw_label();
-    if (!chip_.empty()) draw_chip();
-
     cairo_surface_flush(surface_);
     XFlush(dpy_);
   }
 
-  void draw_constellation() {
+  void draw_constellation(cairo_t* cr) {
     const double ox = 16;
     const double oy = 16;
     const double w = theme::kHudW - 32;
     const double h = 86;
     if (!snap_.hand) {
-      set_hex(cr_, theme::kDim, 0.45);
-      cairo_set_font_size(cr_, 10);
-      cairo_select_font_face(cr_, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
+      set_hex(cr, theme::kDim, 0.45);
+      cairo_set_font_size(cr, 10);
+      cairo_select_font_face(cr, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
                              CAIRO_FONT_WEIGHT_NORMAL);
-      cairo_move_to(cr_, ox + 4, oy + h * 0.55);
-      cairo_show_text(cr_, snap_.camera_ok ? "NO HAND" : "NO CAM");
+      cairo_move_to(cr, ox + 4, oy + h * 0.42);
+      cairo_show_text(cr, snap_.camera_ok ? "NO HAND" : "NO CAM");
+      if (!snap_.message.empty()) {
+        cairo_set_font_size(cr, 8);
+        cairo_move_to(cr, ox + 4, oy + h * 0.62);
+        const std::string clipped = snap_.message.size() > 34
+                                        ? snap_.message.substr(0, 31) + "..."
+                                        : snap_.message;
+        cairo_show_text(cr, clipped.c_str());
+      }
       return;
     }
     const auto& lm = snap_.hand->landmarks;
     auto px = [&](int i) { return ox + (1.0 - lm[static_cast<size_t>(i)].x) * w; };
     auto py = [&](int i) { return oy + lm[static_cast<size_t>(i)].y * h; };
 
-    cairo_set_line_width(cr_, 1.0);
-    cairo_set_line_cap(cr_, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_width(cr, 1.0);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     for (const auto& e : kConnections) {
       const bool index_ray = (e[0] == kIndexMcp && e[1] == kIndexPip) ||
                              (e[0] == kIndexPip && e[1] == kIndexDip) ||
                              (e[0] == kIndexDip && e[1] == kIndexTip) ||
                              (e[0] == 0 && e[1] == kIndexMcp);
-      set_hex(cr_, index_ray ? theme::kAccent : theme::kHair, index_ray ? 0.60 : 0.18);
-      cairo_move_to(cr_, px(e[0]), py(e[0]));
-      cairo_line_to(cr_, px(e[1]), py(e[1]));
-      cairo_stroke(cr_);
+      set_hex(cr, index_ray ? theme::kAccent : theme::kHair, index_ray ? 0.60 : 0.18);
+      cairo_move_to(cr, px(e[0]), py(e[0]));
+      cairo_line_to(cr, px(e[1]), py(e[1]));
+      cairo_stroke(cr);
     }
     for (int i = 0; i < kLandmarkCount; ++i) {
       const bool tip = i == kIndexTip;
-      set_hex(cr_, tip ? theme::kAccent : theme::kPaper, tip ? 0.90 : 0.28);
-      cairo_arc(cr_, px(i), py(i), tip ? 2.4 : 1.4, 0, 6.2832);
-      cairo_fill(cr_);
+      set_hex(cr, tip ? theme::kAccent : theme::kPaper, tip ? 0.90 : 0.28);
+      cairo_arc(cr, px(i), py(i), tip ? 2.4 : 1.4, 0, 6.2832);
+      cairo_fill(cr);
     }
   }
 
-  void draw_label() {
-    const char* label = pose_label(snap_.pose).data();
-    set_hex(cr_, theme::kPaper, 0.92);
-    cairo_select_font_face(cr_, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
+  void draw_label(cairo_t* cr) {
+    const char* label =
+        snap_.status.empty() ? pose_label(snap_.pose).data() : snap_.status.data();
+    set_hex(cr, theme::kPaper, 0.92);
+    cairo_select_font_face(cr, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr_, 11);
+    cairo_set_font_size(cr, 11);
     cairo_text_extents_t ext{};
-    cairo_text_extents(cr_, label, &ext);
-    cairo_move_to(cr_, 16, theme::kHudH - 18);
-    cairo_show_text(cr_, label);
+    cairo_text_extents(cr, label, &ext);
+    cairo_move_to(cr, 16, theme::kHudH - 18);
+    cairo_show_text(cr, label);
 
     const double tick_w = 36.0 * std::clamp(snap_.command.confidence, 0.f, 1.f);
-    set_hex(cr_, theme::kAccent, 0.80);
-    cairo_set_line_width(cr_, 2.0);
-    cairo_move_to(cr_, theme::kHudW - 16 - 36, theme::kHudH - 20);
-    cairo_line_to(cr_, theme::kHudW - 16 - 36 + tick_w, theme::kHudH - 20);
-    cairo_stroke(cr_);
+    set_hex(cr, theme::kAccent, 0.80);
+    cairo_set_line_width(cr, 2.0);
+    cairo_move_to(cr, theme::kHudW - 16 - 36, theme::kHudH - 20);
+    cairo_line_to(cr, theme::kHudW - 16 - 36 + tick_w, theme::kHudH - 20);
+    cairo_stroke(cr);
   }
 
-  void draw_chip() {
-    cairo_select_font_face(cr_, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
+  void draw_chip(cairo_t* cr) {
+    cairo_select_font_face(cr, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr_, 9);
+    cairo_set_font_size(cr, 9);
     cairo_text_extents_t ext{};
-    cairo_text_extents(cr_, chip_.c_str(), &ext);
-    const double tw = ext.width + 14;
-    const double th = 16;
+    cairo_text_extents(cr, chip_.c_str(), &ext);
+    const double pad = 7;
+    const double tw = ext.width + pad * 2;
+    const double th = 15;
     const double cx = (theme::kHudW - tw) * 0.5;
-    const double cy = theme::kHudH - 8;
-    (void)th;
-    (void)cx;
-    (void)cy;
-    set_hex(cr_, theme::kAccent, 0.85);
-    cairo_move_to(cr_, 16, theme::kHudH - 6);
-    // Chip text is already the pose; keep it quiet — hairline only under the word.
+    const double cy = 6;
+    rounded_rect(cr, cx, cy, tw, th, th * 0.5);
+    set_hex(cr, theme::kAccent, 0.90);
+    cairo_fill(cr);
+    set_hex(cr, theme::kVoid, 0.95);
+    cairo_move_to(cr, cx + pad - ext.x_bearing, cy + (th + ext.height) * 0.5);
+    cairo_show_text(cr, chip_.c_str());
   }
 
   Display* dpy_ = nullptr;
@@ -281,6 +315,8 @@ class X11Overlay final : public Overlay {
   int y_ = 0;
   cairo_surface_t* surface_ = nullptr;
   cairo_t* cr_ = nullptr;
+  cairo_surface_t* offscreen_ = nullptr;
+  cairo_t* off_cr_ = nullptr;
   TrackingSnapshot snap_{};
   std::string chip_;
   std::chrono::steady_clock::time_point chip_until_{};

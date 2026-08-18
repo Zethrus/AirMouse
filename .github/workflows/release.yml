@@ -39,7 +39,7 @@ jobs:
             cmake ninja-build g++ pkg-config \
             libx11-dev libxtst-dev libxext-dev libxrender-dev libxfixes-dev \
             libcairo2-dev libpango1.0-dev libdbus-1-dev \
-            libegl-dev libgles-dev \
+            libegl-dev libgles-dev libjpeg-dev \
             dpkg-dev rpm
       - name: Configure
         run: >

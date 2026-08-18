@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace airmouse {
@@ -119,6 +120,7 @@ struct TrackingSnapshot {
   float fps = 0;
   bool camera_ok = false;
   std::string_view status;
+  std::string message;
 };
 
 }  // namespace airmouse

@@ -35,7 +35,30 @@ sudo usermod -aG input "$USER"
 # then log out
 ```
 
-Config lives at `~/.config/airmouse/config.json`.
+Config lives at `~/.config/airmouse/config.json` on Linux and `%APPDATA%\AirMouse\config.json` on Windows.
+
+The app stays in the system tray. Left-click pauses tracking; right-click opens the menu (HUD, settings, calibrate, quit).
+
+Linux camera access uses V4L2 (no portal prompt). If the HUD says `NO CAM`, add your user to the `video` group and log out:
+
+```bash
+sudo usermod -aG video "$USER"
+```
+
+AirMouse then picks the first real capture node (`/dev/video0` is often metadata-only). YUYV, UYVY, and MJPEG cameras are supported.
+
+## Windows
+
+Windows builds use Media Foundation for the camera, a GDI+ layered HUD, a notification-area tray, and `SendInput` for the pointer. Allow AirMouse under **Settings → Privacy & security → Camera**.
+
+```powershell
+cmake -S . -B build -A x64
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+.\build\Release\airmouse.exe
+```
+
+Portable zip layouts keep `airmouse.exe`, `libmediapipe.dll`, and `assets/` next to each other. The tray icon pauses or resumes tracking; the HUD is click-through and sits on the primary monitor.
 
 ## Releases
 

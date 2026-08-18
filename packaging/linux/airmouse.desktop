@@ -7,3 +7,4 @@ Icon=airmouse
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=false
+StartupWMClass=AirMouse

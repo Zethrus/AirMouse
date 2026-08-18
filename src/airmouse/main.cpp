@@ -29,7 +29,6 @@ void on_signal(int) { g_run = false; }
 
 #ifdef _WIN32
 void enable_dpi() {
-  using Fn = BOOL(WINAPI*)(HANDLE);
   if (HMODULE user = GetModuleHandleW(L"user32.dll")) {
     if (auto fn = reinterpret_cast<BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT)>(
             GetProcAddress(user, "SetProcessDpiAwarenessContext"))) {
@@ -46,7 +45,8 @@ int main(int argc, char** argv) {
   (void)argv;
 #ifdef _WIN32
   enable_dpi();
-  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const bool com_balanced = SUCCEEDED(com);
 #endif
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
@@ -79,8 +79,8 @@ int main(int argc, char** argv) {
   dbus->advertise();
 
   airmouse::Tracker tracker(cfg);
-  const bool started = tracker.start();
-  if (!started) {
+  tracker.start();
+  if (!tracker.last_error().empty()) {
     std::cerr << "tracker: " << tracker.last_error() << '\n';
   }
 
@@ -118,6 +118,16 @@ int main(int argc, char** argv) {
   });
   hotkey->set_handler(toggle);
   dbus->set_handler(toggle);
+  settings->set_on_change([&](const airmouse::Config& next) {
+    cfg = next;
+    tracker.set_config(cfg);
+    if (cfg.hud.enabled) {
+      overlay->create();
+      overlay->set_visible(true);
+    } else {
+      overlay->set_visible(false);
+    }
+  });
 
   while (g_run) {
     const auto snap = tracker.snapshot();
@@ -141,5 +151,8 @@ int main(int argc, char** argv) {
     airmouse::save_config(cfg_path, cfg);
   } catch (...) {
   }
-  return started ? 0 : 1;
+#ifdef _WIN32
+  if (com_balanced) CoUninitialize();
+#endif
+  return 0;
 }
