@@ -12,7 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
   add_compile_options(/W4 /utf-8)
-  add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE)
+  add_definitions(-DNOMINMAX -DUNICODE -D_UNICODE)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
