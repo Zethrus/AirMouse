@@ -1,5 +1,6 @@
 /build/
 /out/
+/dist/
 /cmake-build-*/
 /.cache/
 *.o
@@ -16,3 +17,23 @@
 .DS_Store
 compile_commands.json
 CMakeUserPresets.json
+
+# Secrets and credentials — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+id_rsa
+id_ed25519
+id_ecdsa
+credentials.json
+service-account.json
+secrets.json
+*.token
+auth.json
+.npmrc
+.pypirc
