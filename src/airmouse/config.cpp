@@ -160,7 +160,9 @@ std::filesystem::path asset_root() {
   const std::filesystem::path candidates[] = {
       dir / "assets",
       dir.parent_path() / "assets",
+      dir.parent_path() / "share" / "airmouse",
       dir.parent_path().parent_path() / "assets",
+      dir.parent_path().parent_path() / "share" / "airmouse",
       std::filesystem::current_path() / "assets",
   };
   for (const auto& c : candidates) {

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules || true
+  udevadm trigger --subsystem-match=misc --action=change || true
+fi
+echo "AirMouse: add your user to the input group for Wayland (uinput), then log out:"
+echo "  sudo usermod -aG input \"\$USER\""
+exit 0

@@ -48,7 +48,11 @@ git push origin v0.1.0
 
 That publishes:
 
-- `airmouse-<version>-linux-x86_64.tar.gz`
-- `airmouse-<version>-windows-x64.zip`
+- `airmouse_<version>_amd64.deb` — Debian / Ubuntu
+- `airmouse-<version>-1.x86_64.rpm` — Fedora / RHEL / openSUSE
+- `airmouse-<version>-linux-x86_64.tar.gz` — generic Linux
+- `airmouse-<version>-windows-x64.exe` — Windows 11 NSIS installer
+- `airmouse-<version>-windows-x64.msi` — Windows 11 MSI
+- `airmouse-<version>-windows-x64.zip` — portable Windows build (`airmouse.exe`)
 
 CI on `main` and pull requests compiles and tests both platforms without making a GitHub Release.

@@ -177,6 +177,8 @@ else()
   install(FILES packaging/linux/airmouse.desktop
           DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
   install(FILES packaging/linux/udev/99-airmouse-uinput.rules
-          DESTINATION ${CMAKE_INSTALL_DATADIR}/airmouse)
+          DESTINATION lib/udev/rules.d)
   install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPackAirMouse.cmake")
