@@ -1,6 +1,14 @@
 #include "airmouse/ui/settings.hpp"
 
 #include <iostream>
+#include <string>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace airmouse {
 
@@ -19,6 +27,10 @@ class FileSettings final : public SettingsWindow {
     } catch (...) {
     }
     std::cerr << "AirMouse settings: " << path.string() << '\n';
+#ifdef _WIN32
+    const std::string msg = "Config file:\n" + path.string();
+    MessageBoxA(nullptr, msg.c_str(), "AirMouse settings", MB_OK | MB_ICONINFORMATION);
+#endif
   }
   void hide() override { visible_ = false; }
   bool visible() const override { return visible_; }

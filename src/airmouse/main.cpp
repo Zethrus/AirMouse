@@ -8,6 +8,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <objbase.h>
 #include <windows.h>
 #endif
 
@@ -45,6 +46,7 @@ int main(int argc, char** argv) {
   (void)argv;
 #ifdef _WIN32
   enable_dpi();
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 #endif
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);

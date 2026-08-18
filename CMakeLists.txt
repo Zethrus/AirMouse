@@ -97,7 +97,9 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(WIN32)
-  target_link_libraries(airmouse_core PUBLIC user32)
+  target_link_libraries(airmouse_core PUBLIC
+    user32 gdi32 gdiplus msimg32 shell32 ole32 oleaut32 uuid
+    mfplat mfreadwrite mf mfuuid)
 endif()
 
 if(WIN32 AND EXISTS "${MP_SHARED}" AND NOT EXISTS "${MP_IMPLIB}")
