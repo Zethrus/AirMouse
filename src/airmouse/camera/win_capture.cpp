@@ -554,6 +554,23 @@ std::vector<int> list_camera_indices() {
   return out;
 }
 
+std::vector<CameraDevice> list_camera_devices() {
+  std::vector<CameraDevice> out;
+  for (int index : list_camera_indices()) {
+    CameraDevice dev;
+    dev.index = index;
+    dev.path = "camera:" + std::to_string(index);
+    dev.name = "Camera " + std::to_string(index);
+    dev.capture = true;
+    out.push_back(std::move(dev));
+  }
+  return out;
+}
+
+CameraAbsence diagnose_camera() {
+  return list_camera_indices().empty() ? CameraAbsence::NoDevice : CameraAbsence::Present;
+}
+
 }  // namespace airmouse
 
 #endif

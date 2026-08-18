@@ -231,7 +231,11 @@ class X11Overlay final : public Overlay {
       cairo_select_font_face(cr, "IBM Plex Mono", CAIRO_FONT_SLANT_NORMAL,
                              CAIRO_FONT_WEIGHT_NORMAL);
       cairo_move_to(cr, ox + 4, oy + h * 0.42);
-      cairo_show_text(cr, snap_.camera_ok ? "NO HAND" : "NO CAM");
+      const char* empty = "NO HAND";
+      if (!snap_.camera_ok) {
+        empty = snap_.status.empty() ? "NO CAM" : snap_.status.data();
+      }
+      cairo_show_text(cr, empty);
       if (!snap_.message.empty()) {
         cairo_set_font_size(cr, 8);
         cairo_move_to(cr, ox + 4, oy + h * 0.62);

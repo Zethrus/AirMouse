@@ -48,11 +48,7 @@ class X11Settings final : public SettingsWindow {
     }
     dpy_ = XOpenDisplay(nullptr);
     if (!dpy_ || !cfg_) return;
-    cameras_ = list_camera_indices();
-    cam_sel_ = 0;
-    for (size_t i = 0; i < cameras_.size(); ++i) {
-      if (cameras_[i] == cfg_->camera_index) cam_sel_ = static_cast<int>(i) + 1;
-    }
+    refresh_cameras();
 
     XVisualInfo vinfo;
     if (!XMatchVisualInfo(dpy_, DefaultScreen(dpy_), 32, TrueColor, &vinfo)) {
@@ -156,9 +152,10 @@ class X11Settings final : public SettingsWindow {
       else if (std::strcmp(h.id, "chips") == 0) cfg_->hud.chips = !cfg_->hud.chips;
       else if (std::strcmp(h.id, "mirror") == 0) cfg_->mirror = !cfg_->mirror;
       else if (std::strcmp(h.id, "cam") == 0) {
+        refresh_cameras();
         const int n = static_cast<int>(cameras_.size()) + 1;
-        cam_sel_ = (cam_sel_ + 1) % n;
-        cfg_->camera_index = cam_sel_ == 0 ? -1 : cameras_[static_cast<size_t>(cam_sel_ - 1)];
+        cam_sel_ = (cam_sel_ + 1) % std::max(1, n);
+        cfg_->camera_index = cam_sel_ == 0 ? -1 : cameras_[static_cast<size_t>(cam_sel_ - 1)].index;
       } else if (std::strcmp(h.id, "box") == 0) {
         const float t = std::clamp((x - h.x) / static_cast<float>(h.w), 0.f, 1.f);
         cfg_->control_box = 0.35f + t * 0.55f;
@@ -182,15 +179,30 @@ class X11Settings final : public SettingsWindow {
     }
   }
 
+  void refresh_cameras() {
+    cameras_ = list_camera_devices();
+    cam_sel_ = 0;
+    if (!cfg_) return;
+    for (size_t i = 0; i < cameras_.size(); ++i) {
+      if (cameras_[i].index == cfg_->camera_index) cam_sel_ = static_cast<int>(i) + 1;
+    }
+  }
+
   std::string camera_label() const {
-    if (cam_sel_ == 0) return "Camera  Auto";
-    return "Camera  /dev/video" + std::to_string(cameras_[static_cast<size_t>(cam_sel_ - 1)]);
+    if (cameras_.empty()) return "Camera  No camera";
+    if (cam_sel_ == 0) {
+      if (cameras_.size() == 1) return "Camera  Auto — " + cameras_.front().name;
+      return "Camera  Auto";
+    }
+    return "Camera  " + cameras_[static_cast<size_t>(cam_sel_ - 1)].name;
   }
 
   void draw() {
     if (!dpy_ || !win_) return;
-    cairo_surface_t* xs =
-        cairo_xlib_surface_create(dpy_, win_, DefaultVisual(dpy_, DefaultScreen(dpy_)), kW, kH);
+    XWindowAttributes wa{};
+    XGetWindowAttributes(dpy_, win_, &wa);
+    Visual* visual = wa.visual ? wa.visual : DefaultVisual(dpy_, DefaultScreen(dpy_));
+    cairo_surface_t* xs = cairo_xlib_surface_create(dpy_, win_, visual, kW, kH);
     cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kW, kH);
     cairo_t* cr = cairo_create(img);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
@@ -217,6 +229,13 @@ class X11Settings final : public SettingsWindow {
       cairo_move_to(cr, hit.x + 12, hit.y + 19);
       cairo_show_text(cr, text.c_str());
     };
+
+    if (cameras_.empty()) {
+      set_hex(cr, theme::kDim, 0.85);
+      cairo_set_font_size(cr, 10);
+      cairo_move_to(cr, 24, 122);
+      cairo_show_text(cr, "Press the laptop camera key, then click the camera row");
+    }
 
     for (const auto& h : layout()) {
       if (std::strcmp(h.id, "cam") == 0) chip(h, camera_label(), false);
@@ -260,7 +279,7 @@ class X11Settings final : public SettingsWindow {
   bool visible_ = false;
   int x_ = 0;
   int y_ = 0;
-  std::vector<int> cameras_;
+  std::vector<CameraDevice> cameras_;
   int cam_sel_ = 0;
 };
 

@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "airmouse/ui/dbusmenu.hpp"
 #include "airmouse/ui/icon.hpp"
 #include "airmouse/ui/theme.hpp"
 
@@ -171,6 +172,7 @@ class SniTray final : public Tray {
  public:
   ~SniTray() override {
     hide_menu();
+    menu_.detach();
     if (conn_ && registered_path_) {
       dbus_connection_unregister_object_path(conn_, "/StatusNotifierItem");
     }
@@ -205,6 +207,7 @@ class SniTray final : public Tray {
       return false;
     }
     registered_path_ = true;
+    menu_.attach(conn_, "/MenuBar");
 
     dbus_bus_add_match(
         conn_,
@@ -215,10 +218,14 @@ class SniTray final : public Tray {
     return true;
   }
 
-  void set_status(const std::string& text) override { tooltip_ = text; }
+  void set_status(const std::string& text) override {
+    tooltip_ = text;
+    menu_.set_paused(text == "paused");
+  }
 
   void set_handler(std::function<void(TrayAction)> handler) override {
     handler_ = std::move(handler);
+    menu_.set_handler(handler_);
   }
 
   void poll() override {
@@ -325,7 +332,7 @@ class SniTray final : public Tray {
       dbus_bool_t v = FALSE;
       dbus_message_iter_append_basic(var, DBUS_TYPE_BOOLEAN, &v);
     } else if (std::strcmp(name, "Menu") == 0) {
-      const char* v = "/NO_DBUSMENU";
+      const char* v = "/MenuBar";
       dbus_message_iter_append_basic(var, DBUS_TYPE_OBJECT_PATH, &v);
     } else if (std::strcmp(name, "ToolTip") == 0) {
       DBusMessageIter st;
@@ -458,9 +465,11 @@ class SniTray final : public Tray {
     XChangeProperty(dpy_, menu_win_, type, XA_ATOM, 32, PropModeReplace,
                     reinterpret_cast<unsigned char*>(&popup), 1);
     XMapRaised(dpy_, menu_win_);
-    XGrabPointer(dpy_, menu_win_, True,
-                 ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync,
-                 GrabModeAsync, None, None, CurrentTime);
+    if (XGrabPointer(dpy_, menu_win_, True,
+                     ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync,
+                     GrabModeAsync, None, None, CurrentTime) != GrabSuccess) {
+      // Still show the menu; click-off dismiss may be less reliable.
+    }
     draw_menu(-1);
   }
 
@@ -482,11 +491,11 @@ class SniTray final : public Tray {
 
   void draw_menu(int hover) {
     if (!dpy_ || !menu_win_) return;
-    cairo_surface_t* surface =
-        cairo_xlib_surface_create(dpy_, menu_win_, DefaultVisual(dpy_, DefaultScreen(dpy_)),
-                                  menu_w_, menu_h_);
     XWindowAttributes wa{};
     XGetWindowAttributes(dpy_, menu_win_, &wa);
+    Visual* visual = wa.visual ? wa.visual : DefaultVisual(dpy_, DefaultScreen(dpy_));
+    cairo_surface_t* surface =
+        cairo_xlib_surface_create(dpy_, menu_win_, visual, menu_w_, menu_h_);
     cairo_xlib_surface_set_size(surface, menu_w_, menu_h_);
     cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, menu_w_, menu_h_);
     cairo_t* cr = cairo_create(img);
@@ -577,6 +586,7 @@ class SniTray final : public Tray {
   }
 
   DBusConnection* conn_ = nullptr;
+  DbusMenu menu_;
   Display* dpy_ = nullptr;
   Window menu_win_ = 0;
   int menu_x_ = 0;

@@ -10,6 +10,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -145,7 +146,7 @@ class V4l2Camera final : public Camera {
       if (found != index) candidates.push_back(found);
     }
     if (candidates.empty()) {
-      err_ = "no V4L2 capture device (check Camera privacy and the 'video' group)";
+      err_ = camera_absence_message(diagnose_camera());
       return false;
     }
 
@@ -163,16 +164,7 @@ class V4l2Camera final : public Camera {
   }
 
   void close() override {
-    if (fd_ >= 0) {
-      v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-      ioctl(fd_, VIDIOC_STREAMOFF, &type);
-    }
-    for (auto& b : bufs_) {
-      if (b.start && b.start != MAP_FAILED) {
-        munmap(b.start, b.length);
-      }
-    }
-    bufs_.clear();
+    release_stream();
     if (fd_ >= 0) {
       ::close(fd_);
       fd_ = -1;
@@ -225,21 +217,42 @@ class V4l2Camera final : public Camera {
   std::string last_error() const override { return err_; }
 
  private:
+  void release_stream() {
+    if (fd_ >= 0) {
+      v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      ioctl(fd_, VIDIOC_STREAMOFF, &type);
+    }
+    for (auto& b : bufs_) {
+      if (b.start && b.start != MAP_FAILED) {
+        munmap(b.start, b.length);
+      }
+    }
+    bufs_.clear();
+    if (fd_ >= 0) {
+      v4l2_requestbuffers req{};
+      req.count = 0;
+      req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      req.memory = V4L2_MEMORY_MMAP;
+      ioctl(fd_, VIDIOC_REQBUFS, &req);
+    }
+  }
+
   bool open_device(int index, int width, int height, int fps) {
     char path[64];
     std::snprintf(path, sizeof(path), "/dev/video%d", index);
     fd_ = ::open(path, O_RDWR | O_NONBLOCK);
     if (fd_ < 0) {
-      err_ = errno_text(path);
+      if (errno == EACCES) {
+        err_ = camera_absence_message(CameraAbsence::Permission);
+      } else if (errno == EBUSY) {
+        err_ = camera_absence_message(CameraAbsence::Busy);
+      } else {
+        err_ = errno_text(path);
+      }
       return false;
     }
     if (!is_capture_fd(fd_)) {
       err_ = std::string(path) + " is not a capture node";
-      close();
-      return false;
-    }
-
-    if (!negotiate_format(width, height)) {
       close();
       return false;
     }
@@ -252,13 +265,65 @@ class V4l2Camera final : public Camera {
       ioctl(fd_, VIDIOC_S_PARM, &parm);
     }
 
+    const uint32_t wanted[] = {
+        V4L2_PIX_FMT_YUYV,
+        V4L2_PIX_FMT_UYVY,
+#ifdef AIRMOUSE_HAVE_JPEG
+        V4L2_PIX_FMT_MJPEG,
+        V4L2_PIX_FMT_JPEG,
+#endif
+    };
+    std::string format_errors;
+    for (uint32_t fourcc : wanted) {
+      if (!apply_format(fourcc, width, height)) {
+        if (!format_errors.empty()) format_errors += " | ";
+        format_errors += err_;
+        continue;
+      }
+      if (start_stream(path)) {
+        err_.clear();
+        return true;
+      }
+      if (!format_errors.empty()) format_errors += " | ";
+      format_errors += err_;
+      release_stream();
+    }
+    err_ = format_errors.empty() ? "camera has no YUYV/UYVY/MJPEG format" : format_errors;
+    close();
+    return false;
+  }
+
+  bool apply_format(uint32_t fourcc, int width, int height) {
+    v4l2_format fmt{};
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width = static_cast<uint32_t>(width);
+    fmt.fmt.pix.height = static_cast<uint32_t>(height);
+    fmt.fmt.pix.pixelformat = fourcc;
+    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+    if (ioctl(fd_, VIDIOC_S_FMT, &fmt) < 0 || fmt.fmt.pix.pixelformat != fourcc) {
+      err_ = "format rejected";
+      return false;
+    }
+    width_ = static_cast<int>(fmt.fmt.pix.width);
+    height_ = static_cast<int>(fmt.fmt.pix.height);
+    stride_ = static_cast<int>(fmt.fmt.pix.bytesperline);
+    if (fourcc == V4L2_PIX_FMT_YUYV) kind_ = PixelKind::Yuyv;
+    else if (fourcc == V4L2_PIX_FMT_UYVY) kind_ = PixelKind::Uyvy;
+    else kind_ = PixelKind::Mjpeg;
+    if (width_ <= 0 || height_ <= 0) {
+      err_ = "invalid capture size";
+      return false;
+    }
+    return true;
+  }
+
+  bool start_stream(const char* path) {
     v4l2_requestbuffers req{};
     req.count = 4;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
     if (ioctl(fd_, VIDIOC_REQBUFS, &req) < 0 || req.count < 2) {
       err_ = std::string(path) + " VIDIOC_REQBUFS failed";
-      close();
       return false;
     }
     bufs_.resize(req.count);
@@ -269,7 +334,6 @@ class V4l2Camera final : public Camera {
       buf.index = i;
       if (ioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
         err_ = "VIDIOC_QUERYBUF failed";
-        close();
         return false;
       }
       bufs_[i].length = buf.length;
@@ -278,12 +342,10 @@ class V4l2Camera final : public Camera {
       if (bufs_[i].start == MAP_FAILED) {
         bufs_[i].start = nullptr;
         err_ = "mmap failed";
-        close();
         return false;
       }
       if (ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
         err_ = "VIDIOC_QBUF failed";
-        close();
         return false;
       }
     }
@@ -291,40 +353,9 @@ class V4l2Camera final : public Camera {
     v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
       err_ = std::string(path) + " VIDIOC_STREAMON failed";
-      close();
       return false;
     }
     return true;
-  }
-
-  bool negotiate_format(int width, int height) {
-    const uint32_t wanted[] = {
-        V4L2_PIX_FMT_YUYV,
-        V4L2_PIX_FMT_UYVY,
-#ifdef AIRMOUSE_HAVE_JPEG
-        V4L2_PIX_FMT_MJPEG,
-        V4L2_PIX_FMT_JPEG,
-#endif
-    };
-    for (uint32_t fourcc : wanted) {
-      v4l2_format fmt{};
-      fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-      fmt.fmt.pix.width = static_cast<uint32_t>(width);
-      fmt.fmt.pix.height = static_cast<uint32_t>(height);
-      fmt.fmt.pix.pixelformat = fourcc;
-      fmt.fmt.pix.field = V4L2_FIELD_NONE;
-      if (ioctl(fd_, VIDIOC_S_FMT, &fmt) < 0) continue;
-      if (fmt.fmt.pix.pixelformat != fourcc) continue;
-      width_ = static_cast<int>(fmt.fmt.pix.width);
-      height_ = static_cast<int>(fmt.fmt.pix.height);
-      stride_ = static_cast<int>(fmt.fmt.pix.bytesperline);
-      if (fourcc == V4L2_PIX_FMT_YUYV) kind_ = PixelKind::Yuyv;
-      else if (fourcc == V4L2_PIX_FMT_UYVY) kind_ = PixelKind::Uyvy;
-      else kind_ = PixelKind::Mjpeg;
-      if (width_ > 0 && height_ > 0) return true;
-    }
-    err_ = "camera has no YUYV/UYVY/MJPEG format";
-    return false;
   }
 
   int fd_ = -1;
@@ -339,19 +370,6 @@ class V4l2Camera final : public Camera {
 }  // namespace
 
 std::unique_ptr<Camera> create_camera() { return std::make_unique<V4l2Camera>(); }
-
-std::vector<int> list_camera_indices() {
-  std::vector<int> out;
-  for (int i = 0; i < 64; ++i) {
-    char path[64];
-    std::snprintf(path, sizeof(path), "/dev/video%d", i);
-    const int fd = ::open(path, O_RDWR | O_NONBLOCK);
-    if (fd < 0) continue;
-    if (is_capture_fd(fd)) out.push_back(i);
-    ::close(fd);
-  }
-  return out;
-}
 
 }  // namespace airmouse
 

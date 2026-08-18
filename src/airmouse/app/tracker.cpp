@@ -147,9 +147,11 @@ void Tracker::loop() {
   auto try_open_camera = [this]() -> bool {
     if (camera_->ok()) return true;
     if (!camera_->open(cfg_.camera_index, cfg_.frame_width, cfg_.frame_height, cfg_.fps)) {
+      const auto absence = diagnose_camera();
       std::lock_guard<std::mutex> lock(mu_);
-      error_ = camera_->last_error().empty() ? "camera open failed" : camera_->last_error();
-      snap_.status = "NO CAM";
+      error_ = camera_->last_error().empty() ? camera_absence_message(absence)
+                                             : camera_->last_error();
+      snap_.status = camera_absence_status(absence);
       snap_.camera_ok = false;
       snap_.message = error_;
       return false;
@@ -213,10 +215,12 @@ void Tracker::loop() {
     snap.pose = paused_ ? PoseName::None : cmd.pose;
     snap.fps = fps;
     snap.camera_ok = camera_->ok();
-    snap.status = !camera_->ok() ? "NO CAM" : (paused_ ? "PAUSED" : pose_label(snap.pose));
     if (!camera_->ok()) {
       std::lock_guard<std::mutex> lock(mu_);
+      snap.status = snap_.status.empty() ? "NO CAM" : snap_.status;
       snap.message = error_;
+    } else {
+      snap.status = paused_ ? "PAUSED" : pose_label(snap.pose);
     }
     {
       std::lock_guard<std::mutex> lock(mu_);

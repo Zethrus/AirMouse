@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(airmouse VERSION 0.1.2 LANGUAGES CXX)
+project(airmouse VERSION 0.1.3 LANGUAGES CXX)
 
 if(NOT AIRMOUSE_VERSION)
   set(AIRMOUSE_VERSION "${PROJECT_VERSION}")
@@ -48,8 +48,10 @@ else()
     src/airmouse/input/linux_xtest.cpp
     src/airmouse/input/linux_uinput.cpp
     src/airmouse/camera/v4l2_capture.cpp
+    src/airmouse/camera/linux_devices.cpp
     src/airmouse/ui/overlay_x11.cpp
     src/airmouse/ui/tray_sni.cpp
+    src/airmouse/ui/dbusmenu.cpp
     src/airmouse/ui/settings_x11.cpp
     src/airmouse/platform/hotkey_x11.cpp
   )
@@ -175,6 +177,7 @@ add_executable(airmouse_tests
   tests/test_mapper.cpp
   tests/test_filter.cpp
   tests/test_factory.cpp
+  tests/test_camera_status.cpp
 )
 target_link_libraries(airmouse_tests PRIVATE airmouse_core GTest::gtest_main)
 add_test(NAME airmouse_tests COMMAND airmouse_tests)

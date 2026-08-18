@@ -37,15 +37,27 @@ sudo usermod -aG input "$USER"
 
 Config lives at `~/.config/airmouse/config.json` on Linux and `%APPDATA%\AirMouse\config.json` on Windows.
 
-The app stays in the system tray. Left-click pauses tracking; right-click opens the menu (HUD, settings, calibrate, quit).
+The app stays in the system tray. On GNOME, right-click the tray icon for Pause, HUD, Settings, Calibrate, and Quit. Double-click pauses or resumes tracking.
 
-Linux camera access uses V4L2 (no portal prompt). If the HUD says `NO CAM`, add your user to the `video` group and log out:
+Linux camera access uses V4L2 (no portal prompt). AirMouse picks the first real capture node (`/dev/video0` is often metadata-only). YUYV, UYVY, and MJPEG cameras are supported.
+
+### Camera stays off (`CAM OFF` / `NO CAM`)
+
+Many laptops (including MSI) cut USB power to the webcam with a keyboard camera key / Fn shortcut. AirMouse cannot flip that switch from userspace. Check:
+
+```bash
+ls /dev/video*
+```
+
+If that list is empty, the camera is powered off. Press the camera key and wait a second — AirMouse reconnects by itself.
+
+If `/dev/video*` exists but open fails with permission denied:
 
 ```bash
 sudo usermod -aG video "$USER"
 ```
 
-AirMouse then picks the first real capture node (`/dev/video0` is often metadata-only). YUYV, UYVY, and MJPEG cameras are supported.
+Then log out and back in. A live session may already have a seat ACL (`getfacl /dev/video0`) even before the group update takes effect.
 
 ## Windows
 
