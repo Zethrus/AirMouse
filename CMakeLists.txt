@@ -136,7 +136,13 @@ add_executable(airmouse src/airmouse/main.cpp)
 target_compile_definitions(airmouse PRIVATE AIRMOUSE_VERSION="${AIRMOUSE_VERSION}")
 target_link_libraries(airmouse PRIVATE airmouse_core)
 if(WIN32)
-  target_sources(airmouse PRIVATE packaging/windows/airmouse.rc)
+  file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/assets/icons/airmouse.ico" _airmouse_ico_native)
+  string(REPLACE "\\" "\\\\" AIRMOUSE_RC_ICON "${_airmouse_ico_native}")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/packaging/windows/airmouse.rc.in"
+    "${CMAKE_BINARY_DIR}/airmouse.rc"
+    @ONLY)
+  target_sources(airmouse PRIVATE "${CMAKE_BINARY_DIR}/airmouse.rc")
 endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(airmouse PRIVATE pthread)
