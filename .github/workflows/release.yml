@@ -56,7 +56,7 @@ jobs:
           cmake --install build --prefix "dist/${NAME}"
           tar -C dist -czf "${NAME}.tar.gz" "${NAME}"
           ls -lh "${NAME}.tar.gz"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: airmouse-linux-x86_64
           path: airmouse-*-linux-x86_64.tar.gz
@@ -95,7 +95,7 @@ jobs:
           cmake --install build --config Release --prefix "dist/${NAME}"
           (cd dist && powershell -Command "Compress-Archive -Path '${NAME}' -DestinationPath '../${NAME}.zip'")
           ls -lh "${NAME}.zip"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: airmouse-windows-x64
           path: airmouse-*-windows-x64.zip
