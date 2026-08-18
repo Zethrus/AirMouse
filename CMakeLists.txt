@@ -86,10 +86,14 @@ if(UNIX AND NOT APPLE)
   pkg_check_modules(CAIRO REQUIRED cairo cairo-xlib)
   pkg_check_modules(PANGO REQUIRED pangocairo)
   pkg_check_modules(DBUS REQUIRED dbus-1)
+  pkg_check_modules(EGL REQUIRED egl)
+  pkg_check_modules(GLESV2 REQUIRED glesv2)
   target_include_directories(airmouse_core PUBLIC
-    ${X11_INCLUDE_DIRS} ${CAIRO_INCLUDE_DIRS} ${PANGO_INCLUDE_DIRS} ${DBUS_INCLUDE_DIRS})
+    ${X11_INCLUDE_DIRS} ${CAIRO_INCLUDE_DIRS} ${PANGO_INCLUDE_DIRS} ${DBUS_INCLUDE_DIRS}
+    ${EGL_INCLUDE_DIRS} ${GLESV2_INCLUDE_DIRS})
   target_link_libraries(airmouse_core PUBLIC
-    ${X11_LIBRARIES} ${CAIRO_LIBRARIES} ${PANGO_LIBRARIES} ${DBUS_LIBRARIES})
+    ${X11_LIBRARIES} ${CAIRO_LIBRARIES} ${PANGO_LIBRARIES} ${DBUS_LIBRARIES}
+    ${EGL_LIBRARIES} ${GLESV2_LIBRARIES})
 endif()
 
 if(WIN32)

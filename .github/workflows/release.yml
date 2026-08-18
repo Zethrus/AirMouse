@@ -38,7 +38,8 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             cmake ninja-build g++ pkg-config \
             libx11-dev libxtst-dev libxext-dev libxrender-dev libxfixes-dev \
-            libcairo2-dev libpango1.0-dev libdbus-1-dev
+            libcairo2-dev libpango1.0-dev libdbus-1-dev \
+            libegl-dev libgles-dev
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja
