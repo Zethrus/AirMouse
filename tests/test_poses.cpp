@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "cammouse/gestures/poses.hpp"
+#include "airmouse/gestures/poses.hpp"
 
-using namespace cammouse;
+using namespace airmouse;
 
 static HandFrame make_open_palm() {
   HandFrame h;

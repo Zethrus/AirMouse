@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "cammouse/input/factory.hpp"
+#include "airmouse/input/factory.hpp"
 
-using namespace cammouse;
+using namespace airmouse;
 
 TEST(Factory, DetectsSomething) {
   const auto kind = detect_session();

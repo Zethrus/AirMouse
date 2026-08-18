@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "cammouse/pointer/filter.hpp"
+#include "airmouse/pointer/filter.hpp"
 
-using namespace cammouse;
+using namespace airmouse;
 
 TEST(Filter, FirstSamplePassthrough) {
   OneEuroFilter f(1.f, 0.007f, 1.f);

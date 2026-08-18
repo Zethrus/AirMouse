@@ -1,4 +1,4 @@
-# CamMouse
+# AirMouse
 
 Webcam hand-gesture mouse for Ubuntu 24.04 (X11 and Wayland) and Windows 11.
 
@@ -14,25 +14,25 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Run from the repo so assets resolve, or set `CAMMOUSE_ASSETS`:
+Run from the repo so assets resolve, or set `AIRMOUSE_ASSETS`:
 
 ```bash
-./build/cammouse
+./build/airmouse
 ```
 
 Pause / resume: `Ctrl+Alt+Shift+C`, or left-click the tray icon. On Wayland bind a GNOME shortcut to:
 
 ```bash
-gdbus call --session --dest org.cammouse.App --object-path /org/cammouse/App \
-  --method org.cammouse.App.TogglePause
+gdbus call --session --dest org.airmouse.App --object-path /org/airmouse/App \
+  --method org.airmouse.App.TogglePause
 ```
 
 Wayland input needs `/dev/uinput` access once:
 
 ```bash
-sudo cp packaging/linux/udev/99-cammouse-uinput.rules /etc/udev/rules.d/
+sudo cp packaging/linux/udev/99-airmouse-uinput.rules /etc/udev/rules.d/
 sudo usermod -aG input "$USER"
 # then log out
 ```
 
-Config lives at `~/.config/cammouse/config.json`.
+Config lives at `~/.config/airmouse/config.json`.

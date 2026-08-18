@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AirMouse
+Comment=Control the pointer with your hands
+Exec=airmouse
+Icon=airmouse
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=false

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "cammouse/pointer/mapper.hpp"
+#include "airmouse/pointer/mapper.hpp"
 
-using namespace cammouse;
+using namespace airmouse;
 
 TEST(Mapper, Corners) {
   Mapper m;

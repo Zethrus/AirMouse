@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include "cammouse/gestures/engine.hpp"
-#include "cammouse/gestures/poses.hpp"
+#include "airmouse/gestures/engine.hpp"
+#include "airmouse/gestures/poses.hpp"
 
-using namespace cammouse;
+using namespace airmouse;
 
 static HandFrame pointing() {
   HandFrame h;

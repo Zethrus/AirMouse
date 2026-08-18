@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=CamMouse
-Comment=Control the pointer with your hands
-Exec=cammouse
-Icon=cammouse
-Terminal=false
-Categories=Utility;Accessibility;
-StartupNotify=false
