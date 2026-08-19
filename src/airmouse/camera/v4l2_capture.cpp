@@ -174,15 +174,24 @@ class V4l2Camera final : public Camera {
 
   bool read(RgbFrame& out) override {
     if (fd_ < 0) return false;
-    v4l2_buffer buf{};
-    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
-    if (ioctl(fd_, VIDIOC_DQBUF, &buf) < 0) {
-      if (errno == EAGAIN) return false;
-      err_ = "VIDIOC_DQBUF failed";
-      return false;
+    v4l2_buffer latest{};
+    bool have = false;
+    for (;;) {
+      v4l2_buffer buf{};
+      buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      buf.memory = V4L2_MEMORY_MMAP;
+      if (ioctl(fd_, VIDIOC_DQBUF, &buf) < 0) {
+        if (errno == EAGAIN) break;
+        err_ = "VIDIOC_DQBUF failed";
+        if (have) ioctl(fd_, VIDIOC_QBUF, &latest);
+        return false;
+      }
+      if (have) ioctl(fd_, VIDIOC_QBUF, &latest);
+      latest = buf;
+      have = true;
     }
-    const auto* src = static_cast<const uint8_t*>(bufs_[buf.index].start);
+    if (!have) return false;
+    const auto* src = static_cast<const uint8_t*>(bufs_[latest.index].start);
     bool ok = false;
     if (kind_ == PixelKind::Yuyv) {
       out.width = width_;
@@ -200,7 +209,7 @@ class V4l2Camera final : public Camera {
     } else if (kind_ == PixelKind::Mjpeg) {
       int w = 0;
       int h = 0;
-      ok = jpeg_to_rgb(src, buf.bytesused, &w, &h, &out.rgb);
+      ok = jpeg_to_rgb(src, latest.bytesused, &w, &h, &out.rgb);
       if (ok) {
         out.width = w;
         out.height = h;
@@ -209,7 +218,7 @@ class V4l2Camera final : public Camera {
       }
 #endif
     }
-    ioctl(fd_, VIDIOC_QBUF, &buf);
+    ioctl(fd_, VIDIOC_QBUF, &latest);
     return ok;
   }
 
@@ -257,6 +266,8 @@ class V4l2Camera final : public Camera {
       return false;
     }
 
+    try_auto_exposure();
+
     if (fps > 0) {
       v4l2_streamparm parm{};
       parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -291,6 +302,21 @@ class V4l2Camera final : public Camera {
     err_ = format_errors.empty() ? "camera has no YUYV/UYVY/MJPEG format" : format_errors;
     close();
     return false;
+  }
+
+  void try_auto_exposure() {
+    if (fd_ < 0) return;
+    v4l2_control c{};
+    c.id = V4L2_CID_EXPOSURE_AUTO;
+    c.value = V4L2_EXPOSURE_APERTURE_PRIORITY;
+    if (ioctl(fd_, VIDIOC_S_CTRL, &c) < 0) {
+      c.value = V4L2_EXPOSURE_AUTO;
+      ioctl(fd_, VIDIOC_S_CTRL, &c);
+    }
+    c = {};
+    c.id = V4L2_CID_AUTOGAIN;
+    c.value = 1;
+    ioctl(fd_, VIDIOC_S_CTRL, &c);
   }
 
   bool apply_format(uint32_t fourcc, int width, int height) {

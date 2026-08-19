@@ -21,6 +21,10 @@ class GestureEngine {
  private:
   const HandFrame* select_hand(const std::vector<HandFrame>& /*unused*/,
                                const HandFrame& hand) const;
+  void reset_transient();
+  Vec2 mirrored(const Vec2& p) const;
+  Vec2 pointing_cursor(const PoseFeatures& feat) const;
+  bool debounced(bool raw_on, bool currently, int& on_streak, int& off_streak) const;
 
   Config cfg_;
   bool had_hand_ = false;
@@ -36,6 +40,25 @@ class GestureEngine {
   int64_t last_click_ms_ = -10000;
   float last_scroll_y_ = 0;
   bool scroll_primed_ = false;
+
+  std::optional<HandFrame> last_hand_;
+  int64_t last_seen_ms_ = -1;
+  PoseFeatures last_feat_{};
+  bool feat_primed_ = false;
+  int left_on_streak_ = 0;
+  int left_off_streak_ = 0;
+  int right_on_streak_ = 0;
+  int right_off_streak_ = 0;
+  bool have_point_ = false;
+  float last_point_nx_ = 0;
+  float last_point_ny_ = 0;
+  bool freeze_ = false;
+  float freeze_nx_ = 0;
+  float freeze_ny_ = 0;
+  float drag_wrist_x_ = 0;
+  float drag_wrist_y_ = 0;
+  float drag_origin_nx_ = 0;
+  float drag_origin_ny_ = 0;
 };
 
 }  // namespace airmouse

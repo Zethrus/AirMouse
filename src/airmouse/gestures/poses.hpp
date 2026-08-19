@@ -17,9 +17,14 @@ struct PoseFeatures {
   bool open_palm = false;
   bool two_finger = false;
   Vec2 index_tip{};
+  Vec2 index_pip{};
+  Vec2 index_mcp{};
+  Vec2 wrist{};
 };
 
 float distance(const Landmark& a, const Landmark& b);
+float distance2(const Landmark& a, const Landmark& b);
 PoseFeatures analyze_pose(const HandFrame& hand);
+PoseFeatures analyze_pose(const HandFrame& hand, const PoseFeatures& prev);
 
 }  // namespace airmouse

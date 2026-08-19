@@ -34,7 +34,14 @@ class MediaPipeLandmarker final : public HandLandmarker {
     }
   }
 
-  bool open(const std::filesystem::path& model) override {
+  bool open(const std::filesystem::path& model, LandmarkerOptions thresholds = {}) override {
+    if (ptr_) {
+      char* close_err = nullptr;
+      MpHandLandmarkerClose(ptr_, &close_err);
+      if (close_err) free(close_err);
+      ptr_ = nullptr;
+    }
+    last_ts_ = -1;
     model_path_ = model.string();
     HandLandmarkerOptions opts{};
     opts.base_options.model_asset_path = model_path_.c_str();
@@ -48,9 +55,9 @@ class MediaPipeLandmarker final : public HandLandmarker {
 #endif
     opts.running_mode = VIDEO;
     opts.num_hands = 2;
-    opts.min_hand_detection_confidence = 0.5f;
-    opts.min_hand_presence_confidence = 0.5f;
-    opts.min_tracking_confidence = 0.5f;
+    opts.min_hand_detection_confidence = thresholds.min_detection;
+    opts.min_hand_presence_confidence = thresholds.min_presence;
+    opts.min_tracking_confidence = thresholds.min_tracking;
     opts.result_callback = nullptr;
 
     char* err = nullptr;
@@ -81,8 +88,12 @@ class MediaPipeLandmarker final : public HandLandmarker {
       return hands;
     }
 
+    int64_t ts = timestamp_ms;
+    if (ts <= last_ts_) ts = last_ts_ + 1;
+    last_ts_ = ts;
+
     HandLandmarkerResult result{};
-    st = MpHandLandmarkerDetectForVideo(ptr_, image, nullptr, timestamp_ms, &result, &err);
+    st = MpHandLandmarkerDetectForVideo(ptr_, image, nullptr, ts, &result, &err);
     if (st != kMpOk) {
       err_ = err ? err : "MpHandLandmarkerDetectForVideo failed";
       if (err) free(err);
@@ -96,10 +107,22 @@ class MediaPipeLandmarker final : public HandLandmarker {
       const NormalizedLandmarks& lm = result.hand_landmarks[i];
       HandFrame hand;
       const uint32_t count = std::min<uint32_t>(lm.landmarks_count, kLandmarkCount);
+      float presence_sum = 0.f;
+      int presence_n = 0;
       for (uint32_t k = 0; k < count; ++k) {
         hand.landmarks[k].x = lm.landmarks[k].x;
         hand.landmarks[k].y = lm.landmarks[k].y;
         hand.landmarks[k].z = lm.landmarks[k].z;
+        if (lm.landmarks[k].has_presence) {
+          presence_sum += lm.landmarks[k].presence;
+          ++presence_n;
+        }
+      }
+      if (presence_n > 0) {
+        hand.presence = presence_sum / static_cast<float>(presence_n);
+      } else if (i < result.handedness_count && result.handedness[i].categories_count > 0 &&
+                 result.handedness[i].categories) {
+        hand.presence = result.handedness[i].categories[0].score;
       }
       if (i < result.handedness_count) {
         hand.side = parse_side(&result.handedness[i]);
@@ -117,6 +140,7 @@ class MediaPipeLandmarker final : public HandLandmarker {
   MpHandLandmarkerPtr ptr_ = nullptr;
   std::string model_path_;
   std::string err_;
+  int64_t last_ts_ = -1;
 };
 
 }  // namespace

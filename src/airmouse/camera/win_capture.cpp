@@ -10,6 +10,7 @@
 #include <mfidl.h>
 #include <mfobjects.h>
 #include <mfreadwrite.h>
+#include <strmif.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -90,6 +91,20 @@ std::string hr_message(HRESULT hr) {
   char buf[64];
   std::snprintf(buf, sizeof(buf), "HRESULT 0x%08lX", static_cast<unsigned long>(hr));
   return buf;
+}
+
+void try_auto_exposure(IMFMediaSource* source) {
+  if (!source) return;
+  IAMCameraControl* cam = nullptr;
+  if (SUCCEEDED(source->QueryInterface(IID_PPV_ARGS(&cam))) && cam) {
+    cam->Set(CameraControl_Exposure, 0, CameraControl_Flags_Auto);
+    cam->Release();
+  }
+  IAMVideoProcAmp* proc = nullptr;
+  if (SUCCEEDED(source->QueryInterface(IID_PPV_ARGS(&proc))) && proc) {
+    proc->Set(VideoProcAmp_Gain, 0, VideoProcAmp_Flags_Auto);
+    proc->Release();
+  }
 }
 
 enum class PixelKind { Rgb24, Rgb32, Yuy2, Nv12, Unknown };
@@ -196,6 +211,7 @@ class MfCamera final : public Camera {
       reader_attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
       reader_attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
     }
+    try_auto_exposure(source);
     hr = MFCreateSourceReaderFromMediaSource(source, reader_attrs, &reader_);
     if (reader_attrs) reader_attrs->Release();
     source->Release();

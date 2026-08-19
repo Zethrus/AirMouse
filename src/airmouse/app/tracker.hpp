@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <mutex>
 #include <thread>
 
@@ -11,6 +12,8 @@
 #include "airmouse/input/backend.hpp"
 #include "airmouse/pointer/filter.hpp"
 #include "airmouse/pointer/mapper.hpp"
+#include "airmouse/tracking/enhance.hpp"
+#include "airmouse/tracking/landmark_filter.hpp"
 #include "airmouse/tracking/landmarker.hpp"
 #include "airmouse/types.hpp"
 
@@ -38,10 +41,14 @@ class Tracker {
   GestureEngine engine_;
   Mapper mapper_;
   OneEuroFilter filter_;
+  LandmarkFilter landmark_filter_;
+  EnhanceState enhance_state_{};
   ScreenGeometry screen_{};
   std::unique_ptr<Camera> camera_;
   std::unique_ptr<HandLandmarker> landmarker_;
   std::unique_ptr<InputBackend> input_;
+  std::filesystem::path model_path_;
+  TrackingConfig opened_tracking_{};
 
   std::thread thread_;
   std::atomic<bool> running_{false};

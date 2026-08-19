@@ -9,6 +9,25 @@ struct SmoothingConfig {
   float mincutoff = 1.0f;
   float beta = 0.007f;
   float dcutoff = 1.0f;
+  float landmark_mincutoff = 1.2f;
+  float landmark_beta = 0.007f;
+  float deadzone = 0.0015f;
+};
+
+struct EnhanceConfig {
+  bool enabled = true;
+  float target_luma = 112.f;
+  float max_gain = 2.4f;
+  float adapt_tau = 0.45f;
+  float denoise_above = 2.0f;
+};
+
+struct TrackingConfig {
+  float min_detection = 0.35f;
+  float min_presence = 0.40f;
+  float min_tracking = 0.30f;
+  int lost_hold_ms = 180;
+  int pinch_frames = 2;
 };
 
 struct HudConfig {
@@ -40,6 +59,8 @@ struct Config {
   int fps = 30;
   float control_box = 0.62f;
   SmoothingConfig smoothing{};
+  EnhanceConfig enhance{};
+  TrackingConfig tracking{};
   std::string dominant_hand = "auto";  // auto | left | right
   std::string hotkey = "ctrl+alt+shift+c";
   HudConfig hud{};

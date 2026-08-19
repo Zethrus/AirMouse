@@ -30,7 +30,22 @@ json to_json(const Config& cfg) {
       {"smoothing",
        {{"mincutoff", cfg.smoothing.mincutoff},
         {"beta", cfg.smoothing.beta},
-        {"dcutoff", cfg.smoothing.dcutoff}}},
+        {"dcutoff", cfg.smoothing.dcutoff},
+        {"landmark_mincutoff", cfg.smoothing.landmark_mincutoff},
+        {"landmark_beta", cfg.smoothing.landmark_beta},
+        {"deadzone", cfg.smoothing.deadzone}}},
+      {"enhance",
+       {{"enabled", cfg.enhance.enabled},
+        {"target_luma", cfg.enhance.target_luma},
+        {"max_gain", cfg.enhance.max_gain},
+        {"adapt_tau", cfg.enhance.adapt_tau},
+        {"denoise_above", cfg.enhance.denoise_above}}},
+      {"tracking",
+       {{"min_detection", cfg.tracking.min_detection},
+        {"min_presence", cfg.tracking.min_presence},
+        {"min_tracking", cfg.tracking.min_tracking},
+        {"lost_hold_ms", cfg.tracking.lost_hold_ms},
+        {"pinch_frames", cfg.tracking.pinch_frames}}},
       {"dominant_hand", cfg.dominant_hand},
       {"hotkey", cfg.hotkey},
       {"hud",
@@ -67,6 +82,26 @@ void merge(Config& cfg, const json& j) {
     if (s.contains("mincutoff")) cfg.smoothing.mincutoff = s["mincutoff"].get<float>();
     if (s.contains("beta")) cfg.smoothing.beta = s["beta"].get<float>();
     if (s.contains("dcutoff")) cfg.smoothing.dcutoff = s["dcutoff"].get<float>();
+    if (s.contains("landmark_mincutoff"))
+      cfg.smoothing.landmark_mincutoff = s["landmark_mincutoff"].get<float>();
+    if (s.contains("landmark_beta")) cfg.smoothing.landmark_beta = s["landmark_beta"].get<float>();
+    if (s.contains("deadzone")) cfg.smoothing.deadzone = s["deadzone"].get<float>();
+  }
+  if (j.contains("enhance")) {
+    const auto& e = j["enhance"];
+    if (e.contains("enabled")) cfg.enhance.enabled = e["enabled"].get<bool>();
+    if (e.contains("target_luma")) cfg.enhance.target_luma = e["target_luma"].get<float>();
+    if (e.contains("max_gain")) cfg.enhance.max_gain = e["max_gain"].get<float>();
+    if (e.contains("adapt_tau")) cfg.enhance.adapt_tau = e["adapt_tau"].get<float>();
+    if (e.contains("denoise_above")) cfg.enhance.denoise_above = e["denoise_above"].get<float>();
+  }
+  if (j.contains("tracking")) {
+    const auto& t = j["tracking"];
+    if (t.contains("min_detection")) cfg.tracking.min_detection = t["min_detection"].get<float>();
+    if (t.contains("min_presence")) cfg.tracking.min_presence = t["min_presence"].get<float>();
+    if (t.contains("min_tracking")) cfg.tracking.min_tracking = t["min_tracking"].get<float>();
+    if (t.contains("lost_hold_ms")) cfg.tracking.lost_hold_ms = t["lost_hold_ms"].get<int>();
+    if (t.contains("pinch_frames")) cfg.tracking.pinch_frames = t["pinch_frames"].get<int>();
   }
   if (j.contains("dominant_hand")) cfg.dominant_hand = j["dominant_hand"].get<std::string>();
   if (j.contains("hotkey")) cfg.hotkey = j["hotkey"].get<std::string>();

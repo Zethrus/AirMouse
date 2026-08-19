@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(airmouse VERSION 0.1.3 LANGUAGES CXX)
+project(airmouse VERSION 0.1.4 LANGUAGES CXX)
 
 if(NOT AIRMOUSE_VERSION)
   set(AIRMOUSE_VERSION "${PROJECT_VERSION}")
@@ -180,6 +180,8 @@ add_executable(airmouse_tests
   tests/test_camera_status.cpp
   tests/test_hud_layout.cpp
   tests/test_hud_drag.cpp
+  tests/test_enhance.cpp
+  tests/test_landmark_filter.cpp
 )
 target_link_libraries(airmouse_tests PRIVATE airmouse_core GTest::gtest_main)
 add_test(NAME airmouse_tests COMMAND airmouse_tests)

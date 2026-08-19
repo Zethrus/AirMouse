@@ -14,6 +14,8 @@ void OneEuroFilter::set_params(float mincutoff, float beta, float dcutoff) {
   dcutoff_ = dcutoff;
 }
 
+void OneEuroFilter::set_deadzone(float deadzone) { deadzone_ = std::max(0.f, deadzone); }
+
 void OneEuroFilter::reset() { primed_ = false; }
 
 void OneEuroFilter::tighten(float mincutoff) { mincutoff_ = mincutoff; }
@@ -33,6 +35,13 @@ Vec2 OneEuroFilter::filter(Vec2 value, float dt_seconds) {
     hat_x_ = value;
     hat_dx_ = {};
     return value;
+  }
+  if (deadzone_ > 0.f) {
+    const float dx = value.x - hat_x_.x;
+    const float dy = value.y - hat_x_.y;
+    if (dx * dx + dy * dy < deadzone_ * deadzone_) {
+      return hat_x_;
+    }
   }
   const float inv_dt = 1.f / std::max(dt_seconds, 1e-6f);
   const Vec2 vel{(value.x - hat_x_.x) * inv_dt, (value.y - hat_x_.y) * inv_dt};

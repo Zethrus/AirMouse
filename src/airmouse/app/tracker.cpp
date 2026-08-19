@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <optional>
 #include <thread>
 
@@ -30,10 +31,13 @@ Tracker::Tracker(Config cfg)
     : cfg_(std::move(cfg)),
       engine_(cfg_),
       filter_(cfg_.smoothing.mincutoff, cfg_.smoothing.beta, cfg_.smoothing.dcutoff),
+      landmark_filter_(cfg_.smoothing.landmark_mincutoff, cfg_.smoothing.landmark_beta,
+                       cfg_.smoothing.dcutoff),
       camera_(create_camera()),
       landmarker_(create_mediapipe_landmarker()) {
   mapper_.control_box = cfg_.control_box;
   base_mincutoff_ = cfg_.smoothing.mincutoff;
+  filter_.set_deadzone(cfg_.smoothing.deadzone);
 }
 
 Tracker::~Tracker() { stop(); }
@@ -70,6 +74,9 @@ void Tracker::set_config(const Config& cfg) {
   engine_.set_config(cfg_);
   mapper_.control_box = cfg_.control_box;
   filter_.set_params(cfg_.smoothing.mincutoff, cfg_.smoothing.beta, cfg_.smoothing.dcutoff);
+  filter_.set_deadzone(cfg_.smoothing.deadzone);
+  landmark_filter_.set_params(cfg_.smoothing.landmark_mincutoff, cfg_.smoothing.landmark_beta,
+                              cfg_.smoothing.dcutoff);
   base_mincutoff_ = cfg_.smoothing.mincutoff;
 }
 
@@ -100,8 +107,8 @@ void Tracker::apply(const PointerCommand& cmd, float dt) {
   }
   if (cmd.press != Button::Idle) {
     input_->button(cmd.press, true);
-    filter_.tighten(base_mincutoff_ * 1.8f);
-    tighten_until_ms_ = now_ms() + 80;
+    filter_.tighten(base_mincutoff_ * 0.6f);
+    tighten_until_ms_ = now_ms() + 100;
   }
   if (cmd.release != Button::Idle) {
     input_->button(cmd.release, false);
@@ -127,8 +134,11 @@ void Tracker::loop() {
   };
 
   try {
-  const auto model = asset_root() / "models" / "hand_landmarker.task";
-  const bool model_ok = landmarker_->open(model);
+  model_path_ = asset_root() / "models" / "hand_landmarker.task";
+  opened_tracking_ = cfg_.tracking;
+  const bool model_ok = landmarker_->open(model_path_,
+                                          {cfg_.tracking.min_detection, cfg_.tracking.min_presence,
+                                           cfg_.tracking.min_tracking});
   if (!model_ok) {
     std::lock_guard<std::mutex> lock(mu_);
     error_ = landmarker_->last_error();
@@ -178,9 +188,18 @@ void Tracker::loop() {
       next_cam_try = t + 1500;
     }
 
+    if (opened_tracking_.min_detection != cfg_.tracking.min_detection ||
+        opened_tracking_.min_presence != cfg_.tracking.min_presence ||
+        opened_tracking_.min_tracking != cfg_.tracking.min_tracking) {
+      landmarker_->open(model_path_, {cfg_.tracking.min_detection, cfg_.tracking.min_presence,
+                                      cfg_.tracking.min_tracking});
+      opened_tracking_ = cfg_.tracking;
+    }
+
     const bool got = camera_->ok() && camera_->read(frame);
     std::optional<HandFrame> hand;
     if (got) {
+      enhance_frame(frame, enhance_state_, cfg_.enhance, dt);
       auto hands = landmarker_->detect(frame, t);
       if (!hands.empty()) {
         hand = hands.front();
@@ -192,6 +211,7 @@ void Tracker::loop() {
             }
           }
         }
+        hand = landmark_filter_.filter(*hand, dt);
       }
       ++frames;
     }
@@ -204,6 +224,10 @@ void Tracker::loop() {
     PointerCommand cmd{};
     if (!paused_) {
       cmd = engine_.update(hand, t);
+      if (cmd.pose == PoseName::Lost) {
+        filter_.reset();
+        landmark_filter_.reset();
+      }
       apply(cmd, dt);
     } else {
       cmd.pose = PoseName::None;
