@@ -178,6 +178,8 @@ add_executable(airmouse_tests
   tests/test_filter.cpp
   tests/test_factory.cpp
   tests/test_camera_status.cpp
+  tests/test_hud_layout.cpp
+  tests/test_hud_drag.cpp
 )
 target_link_libraries(airmouse_tests PRIVATE airmouse_core GTest::gtest_main)
 add_test(NAME airmouse_tests COMMAND airmouse_tests)

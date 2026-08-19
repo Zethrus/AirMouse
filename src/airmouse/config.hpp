@@ -15,6 +15,9 @@ struct HudConfig {
   bool enabled = true;
   bool chips = true;
   bool show_camera = false;
+  bool placed = false;
+  int x = 0;
+  int y = 0;
 };
 
 struct GestureToggles {

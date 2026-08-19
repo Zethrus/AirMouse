@@ -1,8 +1,10 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 
+#include "airmouse/config.hpp"
 #include "airmouse/types.hpp"
 
 namespace airmouse {
@@ -16,6 +18,9 @@ class Overlay {
   virtual bool visible() const = 0;
   virtual void set_snapshot(const TrackingSnapshot& snap) = 0;
   virtual void set_chip(std::string text) = 0;
+  virtual void set_placement(const HudConfig& hud) = 0;
+  virtual HudConfig placement() const = 0;
+  virtual void set_on_moved(std::function<void(HudConfig)> cb) = 0;
   virtual void poll() = 0;
   virtual bool wants_quit() const = 0;
 };

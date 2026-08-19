@@ -17,24 +17,12 @@
 #include <vector>
 
 #include "airmouse/camera/capture.hpp"
+#include "airmouse/ui/cairo_draw.hpp"
+#include "airmouse/ui/settings_layout.hpp"
 #include "airmouse/ui/theme.hpp"
 
 namespace airmouse {
 namespace {
-
-void rounded_rect(cairo_t* cr, double x, double y, double w, double h, double r) {
-  cairo_new_sub_path(cr);
-  cairo_arc(cr, x + w - r, y + r, r, -1.5708, 0);
-  cairo_arc(cr, x + w - r, y + h - r, r, 0, 1.5708);
-  cairo_arc(cr, x + r, y + h - r, r, 1.5708, 3.1416);
-  cairo_arc(cr, x + r, y + r, r, 3.1416, 4.7124);
-  cairo_close_path(cr);
-}
-
-void set_hex(cairo_t* cr, uint32_t rgb, double a) {
-  cairo_set_source_rgba(cr, ((rgb >> 16) & 0xff) / 255.0, ((rgb >> 8) & 0xff) / 255.0,
-                        (rgb & 0xff) / 255.0, a);
-}
 
 class X11Settings final : public SettingsWindow {
  public:
@@ -60,16 +48,16 @@ class X11Settings final : public SettingsWindow {
     }
     const int sw = DisplayWidth(dpy_, DefaultScreen(dpy_));
     const int sh = DisplayHeight(dpy_, DefaultScreen(dpy_));
-    x_ = (sw - kW) / 2;
-    y_ = (sh - kH) / 3;
+    x_ = (sw - theme::settings::w) / 2;
+    y_ = (sh - theme::settings::h) / 3;
     XSetWindowAttributes swa{};
     swa.colormap = XCreateColormap(dpy_, DefaultRootWindow(dpy_), vinfo.visual, AllocNone);
     swa.border_pixel = 0;
     swa.background_pixel = 0;
     swa.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
                      KeyPressMask | StructureNotifyMask;
-    win_ = XCreateWindow(dpy_, DefaultRootWindow(dpy_), x_, y_, kW, kH, 0, vinfo.depth,
-                         InputOutput, vinfo.visual,
+    win_ = XCreateWindow(dpy_, DefaultRootWindow(dpy_), x_, y_, theme::settings::w,
+                         theme::settings::h, 0, vinfo.depth, InputOutput, vinfo.visual,
                          CWColormap | CWBorderPixel | CWBackPixel | CWEventMask, &swa);
     XStoreName(dpy_, win_, "AirMouse settings");
     wm_delete_ = XInternAtom(dpy_, "WM_DELETE_WINDOW", False);
@@ -117,26 +105,6 @@ class X11Settings final : public SettingsWindow {
   void set_on_change(std::function<void(const Config&)> cb) override { cb_ = std::move(cb); }
 
  private:
-  static constexpr int kW = 380;
-  static constexpr int kH = 392;
-
-  struct Hit {
-    const char* id;
-    int x, y, w, h;
-  };
-
-  std::vector<Hit> layout() const {
-    return {
-        {"cam", 24, 86, kW - 48, 28},
-        {"hud", 24, 136, 160, 24},
-        {"chips", 24, 168, 160, 24},
-        {"mirror", 24, 200, 160, 24},
-        {"box", 24, 252, kW - 48, 18},
-        {"open", 24, kH - 64, 140, 32},
-        {"done", kW - 116, kH - 64, 92, 32},
-    };
-  }
-
   void apply() {
     try {
       save_config(default_config_path(), *cfg_);
@@ -146,12 +114,16 @@ class X11Settings final : public SettingsWindow {
   }
 
   void on_click(int x, int y) {
-    for (const auto& h : layout()) {
-      if (x < h.x || y < h.y || x > h.x + h.w || y > h.y + h.h) continue;
+    for (const auto& h : settings_hits()) {
+      if (!hit_contains(h, x, y)) continue;
       if (std::strcmp(h.id, "hud") == 0) cfg_->hud.enabled = !cfg_->hud.enabled;
       else if (std::strcmp(h.id, "chips") == 0) cfg_->hud.chips = !cfg_->hud.chips;
       else if (std::strcmp(h.id, "mirror") == 0) cfg_->mirror = !cfg_->mirror;
-      else if (std::strcmp(h.id, "cam") == 0) {
+      else if (std::strcmp(h.id, "reset") == 0) {
+        cfg_->hud.placed = false;
+        cfg_->hud.x = 0;
+        cfg_->hud.y = 0;
+      } else if (std::strcmp(h.id, "cam") == 0) {
         refresh_cameras();
         const int n = static_cast<int>(cameras_.size()) + 1;
         cam_sel_ = (cam_sel_ + 1) % std::max(1, n);
@@ -202,62 +174,57 @@ class X11Settings final : public SettingsWindow {
     XWindowAttributes wa{};
     XGetWindowAttributes(dpy_, win_, &wa);
     Visual* visual = wa.visual ? wa.visual : DefaultVisual(dpy_, DefaultScreen(dpy_));
-    cairo_surface_t* xs = cairo_xlib_surface_create(dpy_, win_, visual, kW, kH);
-    cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kW, kH);
+    cairo_surface_t* xs =
+        cairo_xlib_surface_create(dpy_, win_, visual, theme::settings::w, theme::settings::h);
+    cairo_surface_t* img =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, theme::settings::w, theme::settings::h);
     cairo_t* cr = cairo_create(img);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    set_hex(cr, theme::kVoid, 1.0);
+    draw::set_hex(cr, theme::color::panel, 1.0);
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-    set_hex(cr, theme::kPaper, 0.92);
-    cairo_select_font_face(cr, "IBM Plex Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, 18);
-    cairo_move_to(cr, 24, 40);
-    cairo_show_text(cr, "AirMouse");
-    set_hex(cr, theme::kDim, 0.85);
-    cairo_set_font_size(cr, 11);
-    cairo_move_to(cr, 24, 60);
-    cairo_show_text(cr, "Pointer, camera, and overlay");
+    const int pad = theme::space::xl;
+    draw::label_sans(cr, theme::type::title, theme::color::paper, theme::alpha::text, pad, 40,
+                     "AirMouse");
+    draw::label_mono(cr, theme::type::label, theme::color::dim, theme::alpha::muted, pad, 60,
+                     "POINTER  CAMERA  OVERLAY");
 
-    auto chip = [&](const Hit& hit, const std::string& text, bool accent) {
-      rounded_rect(cr, hit.x, hit.y, hit.w, hit.h, 8);
-      set_hex(cr, accent ? theme::kAccent : theme::kHair, accent ? 0.22 : 0.08);
-      cairo_fill(cr);
-      set_hex(cr, accent ? theme::kAccent : theme::kPaper, 0.92);
-      cairo_set_font_size(cr, 12);
-      cairo_move_to(cr, hit.x + 12, hit.y + 19);
-      cairo_show_text(cr, text.c_str());
+    auto chip = [&](const SettingsHit& hit, const std::string& text, bool on) {
+      draw::fill_round_rect(cr, hit.x, hit.y, hit.w, hit.h, theme::radius::chip,
+                            on ? theme::color::accent : theme::color::hair,
+                            on ? theme::alpha::chip_on : theme::alpha::chip_off);
+      draw::label_mono(cr, theme::type::body, on ? theme::color::accent : theme::color::paper,
+                       theme::alpha::text, hit.x + theme::space::md, hit.y + 17, text.c_str());
     };
 
     if (cameras_.empty()) {
-      set_hex(cr, theme::kDim, 0.85);
-      cairo_set_font_size(cr, 10);
-      cairo_move_to(cr, 24, 122);
-      cairo_show_text(cr, "Press the laptop camera key, then click the camera row");
+      draw::label_mono(cr, theme::type::micro, theme::color::dim, theme::alpha::muted, pad, 122,
+                       "Press the laptop camera key, then click the camera row");
     }
 
-    for (const auto& h : layout()) {
+    for (const auto& h : settings_hits()) {
       if (std::strcmp(h.id, "cam") == 0) chip(h, camera_label(), false);
-      else if (std::strcmp(h.id, "hud") == 0) chip(h, cfg_->hud.enabled ? "HUD  on" : "HUD  off", cfg_->hud.enabled);
+      else if (std::strcmp(h.id, "hud") == 0)
+        chip(h, cfg_->hud.enabled ? "HUD  on" : "HUD  off", cfg_->hud.enabled);
       else if (std::strcmp(h.id, "chips") == 0)
         chip(h, cfg_->hud.chips ? "Chips  on" : "Chips  off", cfg_->hud.chips);
       else if (std::strcmp(h.id, "mirror") == 0)
         chip(h, cfg_->mirror ? "Mirror  on" : "Mirror  off", cfg_->mirror);
+      else if (std::strcmp(h.id, "reset") == 0)
+        chip(h, "Reset HUD position", false);
       else if (std::strcmp(h.id, "box") == 0) {
-        set_hex(cr, theme::kDim, 0.85);
-        cairo_set_font_size(cr, 11);
-        cairo_move_to(cr, h.x, h.y - 8);
-        cairo_show_text(cr, "Control box");
-        rounded_rect(cr, h.x, h.y, h.w, h.h, 9);
-        set_hex(cr, theme::kHair, 0.10);
-        cairo_fill(cr);
+        draw::label_mono(cr, theme::type::label, theme::color::dim, theme::alpha::muted, h.x,
+                         h.y - 8, "Control box");
+        draw::fill_round_rect(cr, h.x, h.y, h.w, h.h, theme::radius::chip, theme::color::hair,
+                              theme::alpha::hair_dim);
         const float t = (cfg_->control_box - 0.35f) / 0.55f;
-        rounded_rect(cr, h.x, h.y, h.w * std::clamp(t, 0.f, 1.f), h.h, 9);
-        set_hex(cr, theme::kAccent, 0.85);
-        cairo_fill(cr);
-      } else if (std::strcmp(h.id, "open") == 0) chip(h, "Open config", false);
-      else if (std::strcmp(h.id, "done") == 0) chip(h, "Done", true);
+        draw::fill_round_rect(cr, h.x, h.y, h.w * std::clamp(t, 0.f, 1.f), h.h, theme::radius::chip,
+                              theme::color::accent, theme::alpha::slider);
+      } else if (std::strcmp(h.id, "open") == 0)
+        chip(h, "Open config", false);
+      else if (std::strcmp(h.id, "done") == 0)
+        chip(h, "Done", true);
     }
 
     cairo_destroy(cr);

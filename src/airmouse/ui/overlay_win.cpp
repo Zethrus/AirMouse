@@ -15,11 +15,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "airmouse/config.hpp"
+#include "airmouse/ui/gdi_draw.hpp"
+#include "airmouse/ui/hud_drag.hpp"
+#include "airmouse/ui/hud_metrics.hpp"
 #include "airmouse/ui/theme.hpp"
 
 #pragma comment(lib, "gdiplus.lib")
@@ -36,41 +39,28 @@ using Gdiplus::CompositingModeSourceOver;
 using Gdiplus::Font;
 using Gdiplus::FontFamily;
 using Gdiplus::Graphics;
-using Gdiplus::GraphicsPath;
-using Gdiplus::Pen;
 using Gdiplus::PixelOffsetModeHighQuality;
-using Gdiplus::PointF;
 using Gdiplus::PrivateFontCollection;
-using Gdiplus::RectF;
-using Gdiplus::SolidBrush;
 
-constexpr int kConnections[][2] = {
-    {0, 1},  {1, 2},  {2, 3},  {3, 4},   {0, 5},  {5, 6},  {6, 7},  {7, 8},
-    {0, 9},  {9, 10}, {10, 11}, {11, 12}, {0, 13}, {13, 14}, {14, 15}, {15, 16},
-    {0, 17}, {17, 18}, {18, 19}, {19, 20}, {5, 9},  {9, 13}, {13, 17},
-};
-
-Color argb(uint32_t rgb, double a) {
-  return Color(static_cast<BYTE>(std::clamp(a, 0.0, 1.0) * 255.0),
-               static_cast<BYTE>((rgb >> 16) & 0xff), static_cast<BYTE>((rgb >> 8) & 0xff),
-               static_cast<BYTE>(rgb & 0xff));
-}
-
-std::wstring widen(const std::string& s) {
-  if (s.empty()) return L"";
-  const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-  std::wstring out(static_cast<size_t>(n ? n - 1 : 0), L'\0');
-  if (n > 1) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, out.data(), n);
-  return out;
-}
-
-void add_round_rect(GraphicsPath* path, float x, float y, float w, float h, float r) {
-  r = std::min(r, std::min(w, h) * 0.5f);
-  path->AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
-  path->AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
-  path->AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
-  path->AddArc(x, y, r * 2, r * 2, 180, 90);
-  path->CloseFigure();
+WorkArea win_work_area(HWND hwnd, int x, int y, int w, int h) {
+  RECT probe{x, y, x + w, y + h};
+  HMONITOR mon = hwnd ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                      : MonitorFromRect(&probe, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi{};
+  mi.cbSize = sizeof(mi);
+  WorkArea work;
+  if (GetMonitorInfoW(mon, &mi)) {
+    work.x = static_cast<float>(mi.rcWork.left);
+    work.y = static_cast<float>(mi.rcWork.top);
+    work.w = static_cast<float>(mi.rcWork.right - mi.rcWork.left);
+    work.h = static_cast<float>(mi.rcWork.bottom - mi.rcWork.top);
+    return work;
+  }
+  work.w = static_cast<float>(GetSystemMetrics(SM_CXVIRTUALSCREEN));
+  work.h = static_cast<float>(GetSystemMetrics(SM_CYVIRTUALSCREEN));
+  work.x = static_cast<float>(GetSystemMetrics(SM_XVIRTUALSCREEN));
+  work.y = static_cast<float>(GetSystemMetrics(SM_YVIRTUALSCREEN));
+  return work;
 }
 
 class WinOverlay final : public Overlay {
@@ -97,15 +87,17 @@ class WinOverlay final : public Overlay {
     }
 
     hwnd_ = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        L"AirMouseHud", L"AirMouse", WS_POPUP, 0, 0, theme::kHudW, theme::kHudH, nullptr, nullptr,
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"AirMouseHud",
+        L"AirMouse", WS_POPUP, 0, 0, theme::hud::w, theme::hud::h, nullptr, nullptr,
         GetModuleHandleW(nullptr), this);
     if (!hwnd_) return false;
 
     load_font();
-    apply_layout();
+    apply_metrics();
+    drag_.place(hud_, work_);
     visible_ = true;
     dirty_ = true;
+    last_tick_ = std::chrono::steady_clock::now();
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     draw();
     return true;
@@ -131,7 +123,8 @@ class WinOverlay final : public Overlay {
     visible_ = on;
     ShowWindow(hwnd_, on ? SW_SHOWNOACTIVATE : SW_HIDE);
     if (on) {
-      apply_layout();
+      apply_metrics();
+      drag_.place(hud_, work_);
       dirty_ = true;
     }
   }
@@ -158,6 +151,25 @@ class WinOverlay final : public Overlay {
     dirty_ = true;
   }
 
+  void set_placement(const HudConfig& hud) override {
+    hud_ = hud;
+    if (!hwnd_) return;
+    apply_metrics();
+    drag_.place(hud_, work_);
+    dirty_ = true;
+  }
+
+  HudConfig placement() const override {
+    HudConfig out = hud_;
+    const HudConfig live = drag_.config();
+    out.placed = live.placed;
+    out.x = live.x;
+    out.y = live.y;
+    return out;
+  }
+
+  void set_on_moved(std::function<void(HudConfig)> cb) override { on_moved_ = std::move(cb); }
+
   void poll() override {
     if (hwnd_) {
       MSG msg;
@@ -167,6 +179,9 @@ class WinOverlay final : public Overlay {
       }
     }
     const auto now = std::chrono::steady_clock::now();
+    const float dt = std::chrono::duration<float>(now - last_tick_).count();
+    last_tick_ = now;
+    if (hwnd_ && drag_.tick(std::clamp(dt, 0.f, 0.05f), work_)) dirty_ = true;
     if (!chip_.empty() && now > chip_until_) {
       chip_.clear();
       dirty_ = true;
@@ -194,26 +209,91 @@ class WinOverlay final : public Overlay {
   }
 
   LRESULT handle(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    (void)wparam;
     if (msg == WM_DPICHANGED) {
       const RECT* rec = reinterpret_cast<RECT*>(lparam);
       if (rec) {
-        x_ = rec->left;
-        y_ = rec->top;
+        drag_.x = static_cast<float>(rec->left);
+        drag_.y = static_cast<float>(rec->top);
       }
-      apply_layout();
+      apply_metrics();
+      drag_.place(hud_, work_);
       dirty_ = true;
       return 0;
     }
     if (msg == WM_DISPLAYCHANGE) {
-      apply_layout();
+      apply_metrics();
+      drag_.place(hud_, work_);
       dirty_ = true;
       return 0;
     }
     if (msg == WM_NCHITTEST) {
+      POINT pt{GET_X_LPARAM_SAFE(lparam), GET_Y_LPARAM_SAFE(lparam)};
+      ScreenToClient(hwnd, &pt);
+      if (in_grip(static_cast<float>(pt.x), static_cast<float>(pt.y),
+                  static_cast<float>(phys_w_), scale_)) {
+        return HTCLIENT;
+      }
       return HTTRANSPARENT;
     }
+    if (msg == WM_SETCURSOR) {
+      if (LOWORD(lparam) == HTCLIENT) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZEALL));
+        return TRUE;
+      }
+    }
+    if (msg == WM_MOUSEMOVE) {
+      track_leave();
+      if (drag_.phase == HudDrag::Phase::Dragging) {
+        POINT pt;
+        GetCursorPos(&pt);
+        drag_.on_move(static_cast<float>(pt.x), static_cast<float>(pt.y), work_);
+        dirty_ = true;
+      } else {
+        drag_.on_enter();
+        dirty_ = true;
+      }
+      return 0;
+    }
+    if (msg == WM_MOUSELEAVE) {
+      tracking_leave_ = false;
+      drag_.on_leave();
+      dirty_ = true;
+      return 0;
+    }
+    if (msg == WM_LBUTTONDOWN) {
+      POINT pt;
+      GetCursorPos(&pt);
+      if (drag_.on_press(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
+        SetCapture(hwnd);
+        dirty_ = true;
+      }
+      return 0;
+    }
+    if (msg == WM_LBUTTONUP) {
+      if (GetCapture() == hwnd) ReleaseCapture();
+      work_ = win_work_area(hwnd_, static_cast<int>(drag_.x), static_cast<int>(drag_.y), phys_w_,
+                            phys_h_);
+      if (drag_.on_release(work_)) {
+        hud_ = placement();
+        if (on_moved_) on_moved_(hud_);
+        dirty_ = true;
+      }
+      return 0;
+    }
     return DefWindowProcW(hwnd, msg, wparam, lparam);
+  }
+
+  static int GET_X_LPARAM_SAFE(LPARAM lp) { return static_cast<int>(static_cast<short>(LOWORD(lp))); }
+  static int GET_Y_LPARAM_SAFE(LPARAM lp) { return static_cast<int>(static_cast<short>(HIWORD(lp))); }
+
+  void track_leave() {
+    if (tracking_leave_) return;
+    TRACKMOUSEEVENT tme{};
+    tme.cbSize = sizeof(tme);
+    tme.dwFlags = TME_LEAVE;
+    tme.hwndTrack = hwnd_;
+    TrackMouseEvent(&tme);
+    tracking_leave_ = true;
   }
 
   UINT window_dpi() const {
@@ -228,27 +308,19 @@ class WinOverlay final : public Overlay {
     return 96;
   }
 
-  void apply_layout() {
-    if (!hwnd_) return;
+  void apply_metrics() {
     scale_ = static_cast<float>(window_dpi()) / 96.f;
-    phys_w_ = std::max(1, static_cast<int>(std::lround(theme::kHudW * scale_)));
-    phys_h_ = std::max(1, static_cast<int>(std::lround(theme::kHudH * scale_)));
-
-    HMONITOR mon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi)) {
-      const int pad = static_cast<int>(std::lround(24.f * scale_));
-      x_ = mi.rcWork.right - phys_w_ - pad;
-      y_ = mi.rcWork.top + pad;
-    }
-    SetWindowPos(hwnd_, HWND_TOPMOST, x_, y_, phys_w_, phys_h_, SWP_NOACTIVATE);
+    phys_w_ = std::max(1, static_cast<int>(std::lround(theme::hud::w * scale_)));
+    phys_h_ = std::max(1, static_cast<int>(std::lround(theme::hud::h * scale_)));
+    drag_.set_metrics(static_cast<float>(phys_w_), static_cast<float>(phys_h_), scale_);
+    work_ = win_work_area(hwnd_, static_cast<int>(drag_.x), static_cast<int>(drag_.y), phys_w_,
+                          phys_h_);
   }
 
   void load_font() {
     fonts_ = std::make_unique<PrivateFontCollection>();
     const auto path = asset_root() / "fonts" / "IBMPlexMono-Regular.ttf";
-    const auto wpath = widen(path.string());
+    const auto wpath = draw::widen(path.string());
     if (!wpath.empty()) {
       fonts_->AddFontFile(wpath.c_str());
       auto fam = std::make_unique<FontFamily>(L"IBM Plex Mono", fonts_.get());
@@ -263,6 +335,18 @@ class WinOverlay final : public Overlay {
       return Font(font_family_.get(), size, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
     }
     return Font(L"Consolas", size, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  }
+
+  const wchar_t* status_label() const {
+    if (!snap_.camera_ok) return L"CAM";
+    if (snap_.hand) return L"LIVE";
+    return L"IDLE";
+  }
+
+  uint32_t status_color() const {
+    if (!snap_.camera_ok) return theme::color::warn;
+    if (snap_.hand) return theme::color::accent;
+    return theme::color::dim;
   }
 
   void draw() {
@@ -296,18 +380,56 @@ class WinOverlay final : public Overlay {
       g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
       g.Clear(Color(0, 0, 0, 0));
 
-      GraphicsPath panel;
-      add_round_rect(&panel, 0.5f * scale_, 0.5f * scale_,
-                     static_cast<float>(phys_w_) - scale_, static_cast<float>(phys_h_) - scale_,
-                     static_cast<float>(theme::kHudRadius) * scale_);
-      SolidBrush fill(argb(theme::kVoid, theme::kHudAlpha));
-      g.FillPath(&fill, &panel);
-      Pen hair(argb(theme::kHair, 0.14), scale_);
-      g.DrawPath(&hair, &panel);
+      const HudMetrics m = hud_metrics(scale_);
+      const double glass =
+          theme::alpha::glass + (theme::alpha::lift - theme::alpha::glass) * drag_.lift_t;
+      const double hair_a =
+          theme::alpha::hair + (theme::alpha::lift_hair - theme::alpha::hair) * drag_.lift_t;
+      const double grip_a =
+          theme::alpha::hair_dim + (theme::alpha::hair_hot - theme::alpha::hair_dim) * drag_.hover_t;
+      const double dot_a =
+          theme::alpha::grip_dot + (theme::alpha::grip_dot_hot - theme::alpha::grip_dot) * drag_.hover_t;
 
-      draw_constellation(g);
-      draw_label(g);
-      if (!chip_.empty()) draw_chip(g);
+      draw::fill_round_rect(g, m.chassis.x, m.chassis.y, m.chassis.w, m.chassis.h, m.radius,
+                            theme::color::void_, glass);
+      draw::stroke_round_rect(g, m.chassis.x, m.chassis.y, m.chassis.w, m.chassis.h, m.radius,
+                              theme::color::hair, hair_a, scale_);
+      if (drag_.lift_t > 0.01f) {
+        draw::stroke_round_rect(g, m.chassis.x - scale_, m.chassis.y - scale_, m.chassis.w + 2 * scale_,
+                                m.chassis.h + 2 * scale_, m.radius + scale_, theme::color::accent,
+                                theme::alpha::lift_rim * drag_.lift_t, scale_);
+      }
+      for (const auto& p : m.dots) {
+        draw::dot(g, p.x, p.y, 1.15f * scale_, theme::color::hair, dot_a);
+      }
+      Font micro = make_font(theme::type::micro * scale_);
+      Font label = make_font(theme::type::label * scale_);
+      Font caption = make_font(theme::type::caption * scale_);
+      draw::label(g, micro, theme::color::paper, theme::alpha::muted, m.wordmark.x,
+                  m.wordmark.y - 8.f * scale_, L"AIRMOUSE");
+      draw::dot(g, m.pip.x, m.pip.y, 2.2f * scale_, status_color(), theme::alpha::text);
+      draw::label(g, micro, status_color(), theme::alpha::muted, m.status.x,
+                  m.status.y - 8.f * scale_, status_label());
+      draw::hairline(g, 8.f * scale_, m.rule_y, m.w - 8.f * scale_, m.rule_y, theme::color::hair,
+                     grip_a, scale_);
+      draw::brackets(g, m.well.x, m.well.y, m.well.w, m.well.h, m.bracket, theme::color::hair,
+                     theme::alpha::hair, scale_);
+      draw::range_ticks(g, m.well.x, m.well.y, m.well.w, m.well.h, theme::hud::grid_x,
+                        theme::hud::grid_y, theme::color::hair, theme::alpha::grid, scale_);
+      draw_constellation(g, m, label);
+
+      const std::string_view raw = snap_.status.empty() ? pose_label(snap_.pose) : snap_.status;
+      draw::label(g, label, theme::color::paper, theme::alpha::text, m.pose.x,
+                  m.pose.y - 12.f * scale_, draw::widen(std::string(raw)).c_str());
+      const int filled = static_cast<int>(
+          std::lround(std::clamp(snap_.command.confidence, 0.f, 1.f) * theme::hud::segs));
+      draw::segments(g, m.seg0.x, m.seg0.y, filled, scale_);
+      draw::label(g, micro, theme::color::dim, theme::alpha::muted, m.conf.x,
+                  m.conf.y - 8.f * scale_,
+                  draw::widen(draw::conf_text(snap_.command.confidence)).c_str());
+      if (!chip_.empty()) {
+        draw::chip_brackets(g, caption, m.w * 0.5f, m.chip.y, chip_, scale_);
+      }
     }
 
     BLENDFUNCTION blend{};
@@ -315,7 +437,7 @@ class WinOverlay final : public Overlay {
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
     POINT pt_src{0, 0};
-    POINT pt_dst{x_, y_};
+    POINT pt_dst{static_cast<LONG>(std::lround(drag_.x)), static_cast<LONG>(std::lround(drag_.y))};
     SIZE size{phys_w_, phys_h_};
     UpdateLayeredWindow(hwnd_, screen, &pt_dst, &size, mem, &pt_src, 0, &blend, ULW_ALPHA);
 
@@ -325,70 +447,28 @@ class WinOverlay final : public Overlay {
     ReleaseDC(nullptr, screen);
   }
 
-  void draw_constellation(Graphics& g) {
-    const float ox = 16.f * scale_;
-    const float oy = 16.f * scale_;
-    const float w = static_cast<float>(phys_w_) - 32.f * scale_;
-    const float h = 86.f * scale_;
+  void draw_constellation(Graphics& g, const HudMetrics& m, const Font& font) {
     if (!snap_.hand) {
-      SolidBrush dim(argb(theme::kDim, 0.45));
-      Font font = make_font(10.f * scale_);
       const wchar_t* msg = snap_.camera_ok ? L"NO HAND" : L"NO CAM";
-      g.DrawString(msg, -1, &font, PointF(ox + 4.f * scale_, oy + h * 0.42f), &dim);
+      draw::label(g, font, snap_.camera_ok ? theme::color::dim : theme::color::warn,
+                  theme::alpha::empty, m.well.x + 6.f * scale_, m.well.y + m.well.h * 0.42f, msg);
       return;
     }
     const auto& lm = snap_.hand->landmarks;
-    auto px = [&](int i) { return ox + (1.f - lm[static_cast<size_t>(i)].x) * w; };
-    auto py = [&](int i) { return oy + lm[static_cast<size_t>(i)].y * h; };
-
-    for (const auto& e : kConnections) {
-      const bool index_ray = (e[0] == kIndexMcp && e[1] == kIndexPip) ||
-                             (e[0] == kIndexPip && e[1] == kIndexDip) ||
-                             (e[0] == kIndexDip && e[1] == kIndexTip) ||
-                             (e[0] == 0 && e[1] == kIndexMcp);
-      Pen pen(argb(index_ray ? theme::kAccent : theme::kHair, index_ray ? 0.60 : 0.18), scale_);
-      g.DrawLine(&pen, px(e[0]), py(e[0]), px(e[1]), py(e[1]));
+    auto px = [&](int i) { return m.well.x + (1.f - lm[static_cast<size_t>(i)].x) * m.well.w; };
+    auto py = [&](int i) { return m.well.y + lm[static_cast<size_t>(i)].y * m.well.h; };
+    for (const auto& e : kHandBones) {
+      const bool ray = index_ray(e[0], e[1]);
+      draw::hairline(g, px(e[0]), py(e[0]), px(e[1]), py(e[1]),
+                     ray ? theme::color::accent : theme::color::hair,
+                     ray ? theme::alpha::ray : theme::alpha::bone, scale_);
     }
     for (int i = 0; i < kLandmarkCount; ++i) {
       const bool tip = i == kIndexTip;
-      SolidBrush br(argb(tip ? theme::kAccent : theme::kPaper, tip ? 0.90 : 0.28));
-      const float r = (tip ? 2.4f : 1.4f) * scale_;
-      g.FillEllipse(&br, px(i) - r, py(i) - r, r * 2, r * 2);
+      draw::dot(g, px(i), py(i), (tip ? 2.4f : 1.4f) * scale_,
+                tip ? theme::color::accent : theme::color::paper,
+                tip ? theme::alpha::index_tip : theme::alpha::tip);
     }
-  }
-
-  void draw_label(Graphics& g) {
-    Font font = make_font(11.f * scale_);
-    SolidBrush paper(argb(theme::kPaper, 0.92));
-    const std::string_view raw =
-        snap_.status.empty() ? pose_label(snap_.pose) : snap_.status;
-    const auto label = widen(std::string(raw));
-    g.DrawString(label.c_str(), -1, &font,
-                 PointF(16.f * scale_, static_cast<float>(phys_h_) - 28.f * scale_), &paper);
-    const float tick = 36.f * scale_ * std::clamp(snap_.command.confidence, 0.f, 1.f);
-    Pen accent(argb(theme::kAccent, 0.80), 2.f * scale_);
-    const float x0 = static_cast<float>(phys_w_) - 16.f * scale_ - 36.f * scale_;
-    const float y0 = static_cast<float>(phys_h_) - 20.f * scale_;
-    g.DrawLine(&accent, x0, y0, x0 + tick, y0);
-  }
-
-  void draw_chip(Graphics& g) {
-    Font font = make_font(9.f * scale_);
-    const auto text = widen(chip_);
-    RectF bounds;
-    g.MeasureString(text.c_str(), -1, &font, PointF(0, 0), &bounds);
-    const float pad = 7.f * scale_;
-    const float tw = bounds.Width + pad * 2.f;
-    const float th = 16.f * scale_;
-    const float cx = (static_cast<float>(phys_w_) - tw) * 0.5f;
-    const float cy = 6.f * scale_;
-    GraphicsPath pill;
-    add_round_rect(&pill, cx, cy, tw, th, th * 0.5f);
-    SolidBrush fill(argb(theme::kAccent, 0.90));
-    g.FillPath(&fill, &pill);
-    SolidBrush ink(argb(theme::kVoid, 0.95));
-    g.DrawString(text.c_str(), -1, &font, PointF(cx + pad - 2.f * scale_, cy + 0.5f * scale_),
-                 &ink);
   }
 
   HWND hwnd_ = nullptr;
@@ -398,13 +478,17 @@ class WinOverlay final : public Overlay {
   TrackingSnapshot snap_{};
   std::string chip_;
   std::chrono::steady_clock::time_point chip_until_{};
+  std::chrono::steady_clock::time_point last_tick_{};
   bool visible_ = false;
   bool dirty_ = true;
+  bool tracking_leave_ = false;
   float scale_ = 1.f;
-  int phys_w_ = theme::kHudW;
-  int phys_h_ = theme::kHudH;
-  int x_ = 0;
-  int y_ = 0;
+  int phys_w_ = theme::hud::w;
+  int phys_h_ = theme::hud::h;
+  HudConfig hud_{};
+  HudDrag drag_{};
+  WorkArea work_{};
+  std::function<void(HudConfig)> on_moved_;
 };
 
 }  // namespace

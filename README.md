@@ -37,7 +37,7 @@ sudo usermod -aG input "$USER"
 
 Config lives at `~/.config/airmouse/config.json` on Linux and `%APPDATA%\AirMouse\config.json` on Windows.
 
-The app stays in the system tray. On GNOME, right-click the tray icon for Pause, HUD, Settings, Calibrate, and Quit. Double-click pauses or resumes tracking.
+The app stays in the system tray. On GNOME, right-click the tray icon for Pause, HUD, Settings, Calibrate, and Quit. Double-click pauses or resumes tracking. Drag the HUD by its top rail; Settings → Reset HUD position returns it to the top-right.
 
 Linux camera access uses V4L2 (no portal prompt). AirMouse picks the first real capture node (`/dev/video0` is often metadata-only). YUYV, UYVY, and MJPEG cameras are supported.
 
@@ -70,7 +70,7 @@ ctest --test-dir build -C Release --output-on-failure
 .\build\Release\airmouse.exe
 ```
 
-Portable zip layouts keep `airmouse.exe`, `libmediapipe.dll`, and `assets/` next to each other. The tray icon pauses or resumes tracking; the HUD is click-through and sits on the primary monitor.
+Portable zip layouts keep `airmouse.exe`, `libmediapipe.dll`, and `assets/` next to each other. The tray icon pauses or resumes tracking; the HUD is click-through except for its top grip rail — drag it anywhere and the position persists.
 
 ## Releases
 

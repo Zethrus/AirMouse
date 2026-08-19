@@ -7,11 +7,25 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <gdiplus.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <string>
+
+#include "airmouse/ui/gdi_draw.hpp"
 #include "airmouse/ui/icon.hpp"
+#include "airmouse/ui/settings_layout.hpp"
+#include "airmouse/ui/theme.hpp"
 
 namespace airmouse {
 namespace {
+
+using Gdiplus::Font;
+using Gdiplus::Graphics;
+using Gdiplus::PixelOffsetModeHighQuality;
+using Gdiplus::SolidBrush;
 
 class WinSettings final : public SettingsWindow {
  public:
@@ -25,39 +39,30 @@ class WinSettings final : public SettingsWindow {
       visible_ = true;
       return;
     }
+    if (gdiplus_token_ == 0) {
+      Gdiplus::GdiplusStartupInput input;
+      if (Gdiplus::GdiplusStartup(&gdiplus_token_, &input, nullptr) != Gdiplus::Ok) return;
+    }
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = &WinSettings::wnd_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"AirMouseSettings";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.hbrBackground = nullptr;
     const auto ico = app_icon_path(32);
     if (!ico.empty()) {
       wc.hIcon = static_cast<HICON>(LoadImageW(nullptr, ico.wstring().c_str(), IMAGE_ICON, 32, 32,
                                                LR_LOADFROMFILE));
     }
     RegisterClassExW(&wc);
+    RECT rc{0, 0, theme::settings::w, theme::settings::h};
+    AdjustWindowRectEx(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_APPWINDOW);
     hwnd_ = CreateWindowExW(WS_EX_APPWINDOW, L"AirMouseSettings", L"AirMouse settings",
                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
-                            420, 280, nullptr, nullptr, GetModuleHandleW(nullptr), this);
+                            rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr,
+                            GetModuleHandleW(nullptr), this);
     if (!hwnd_) return;
-    hud_ = CreateWindowW(L"BUTTON", L"Show HUD", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24, 24,
-                         200, 24, hwnd_, reinterpret_cast<HMENU>(1), GetModuleHandleW(nullptr),
-                         nullptr);
-    chips_ = CreateWindowW(L"BUTTON", L"Gesture chips", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24,
-                           56, 200, 24, hwnd_, reinterpret_cast<HMENU>(2),
-                           GetModuleHandleW(nullptr), nullptr);
-    mirror_ = CreateWindowW(L"BUTTON", L"Mirror camera", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24,
-                            88, 200, 24, hwnd_, reinterpret_cast<HMENU>(3),
-                            GetModuleHandleW(nullptr), nullptr);
-    CreateWindowW(L"BUTTON", L"Open config folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 24, 140,
-                  170, 32, hwnd_, reinterpret_cast<HMENU>(10), GetModuleHandleW(nullptr), nullptr);
-    CreateWindowW(L"BUTTON", L"Done", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 280, 140, 90, 32,
-                  hwnd_, reinterpret_cast<HMENU>(11), GetModuleHandleW(nullptr), nullptr);
-    SendMessageW(hud_, BM_SETCHECK, cfg_->hud.enabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageW(chips_, BM_SETCHECK, cfg_->hud.chips ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageW(mirror_, BM_SETCHECK, cfg_->mirror ? BST_CHECKED : BST_UNCHECKED, 0);
     ShowWindow(hwnd_, SW_SHOW);
     visible_ = true;
   }
@@ -66,6 +71,10 @@ class WinSettings final : public SettingsWindow {
     if (hwnd_) DestroyWindow(hwnd_);
     hwnd_ = nullptr;
     visible_ = false;
+    if (gdiplus_token_) {
+      Gdiplus::GdiplusShutdown(gdiplus_token_);
+      gdiplus_token_ = 0;
+    }
   }
   bool visible() const override { return visible_; }
   void poll() override {
@@ -80,14 +89,40 @@ class WinSettings final : public SettingsWindow {
 
  private:
   void apply() {
-    cfg_->hud.enabled = SendMessageW(hud_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    cfg_->hud.chips = SendMessageW(chips_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    cfg_->mirror = SendMessageW(mirror_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     try {
       save_config(default_config_path(), *cfg_);
     } catch (...) {
     }
     if (cb_) cb_(*cfg_);
+  }
+
+  void on_click(int x, int y) {
+    if (!cfg_) return;
+    for (const auto& h : settings_hits()) {
+      if (!hit_contains(h, x, y)) continue;
+      if (std::strcmp(h.id, "hud") == 0) cfg_->hud.enabled = !cfg_->hud.enabled;
+      else if (std::strcmp(h.id, "chips") == 0) cfg_->hud.chips = !cfg_->hud.chips;
+      else if (std::strcmp(h.id, "mirror") == 0) cfg_->mirror = !cfg_->mirror;
+      else if (std::strcmp(h.id, "reset") == 0) {
+        cfg_->hud.placed = false;
+        cfg_->hud.x = 0;
+        cfg_->hud.y = 0;
+      } else if (std::strcmp(h.id, "box") == 0) {
+        const float t = std::clamp((x - h.x) / static_cast<float>(h.w), 0.f, 1.f);
+        cfg_->control_box = 0.35f + t * 0.55f;
+      } else if (std::strcmp(h.id, "open") == 0) {
+        apply();
+        const auto path = default_config_path().parent_path();
+        ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      } else if (std::strcmp(h.id, "done") == 0) {
+        apply();
+        hide();
+        return;
+      }
+      apply();
+      InvalidateRect(hwnd_, nullptr, FALSE);
+      return;
+    }
   }
 
   static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -104,18 +139,17 @@ class WinSettings final : public SettingsWindow {
   }
 
   LRESULT handle(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    if (msg == WM_COMMAND) {
-      const int id = LOWORD(wparam);
-      if (id == 1 || id == 2 || id == 3) apply();
-      if (id == 10) {
-        apply();
-        const auto path = default_config_path().parent_path();
-        ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-      }
-      if (id == 11) {
-        apply();
-        hide();
-      }
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_PAINT) {
+      PAINTSTRUCT ps;
+      HDC hdc = BeginPaint(hwnd, &ps);
+      paint(hdc);
+      EndPaint(hwnd, &ps);
+      return 0;
+    }
+    if (msg == WM_LBUTTONUP) {
+      on_click(static_cast<int>(static_cast<short>(LOWORD(lparam))),
+               static_cast<int>(static_cast<short>(HIWORD(lparam))));
       return 0;
     }
     if (msg == WM_CLOSE) {
@@ -126,12 +160,69 @@ class WinSettings final : public SettingsWindow {
     return DefWindowProcW(hwnd, msg, wparam, lparam);
   }
 
+  void paint(HDC hdc) {
+    Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+    g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
+    SolidBrush bg(draw::argb(theme::color::panel, 1.0));
+    g.FillRectangle(&bg, 0, 0, theme::settings::w, theme::settings::h);
+
+    Font title(L"Segoe UI", theme::type::title, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Font mono(L"Consolas", theme::type::body, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Font micro(L"Consolas", theme::type::micro, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Font label(L"Consolas", theme::type::label, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+
+    const float pad = static_cast<float>(theme::space::xl);
+    draw::label(g, title, theme::color::paper, theme::alpha::text, pad, 18, L"AirMouse");
+    draw::label(g, label, theme::color::dim, theme::alpha::muted, pad, 44,
+                L"POINTER  CAMERA  OVERLAY");
+
+    auto chip = [&](const SettingsHit& hit, const std::wstring& text, bool on) {
+      draw::fill_round_rect(g, static_cast<float>(hit.x), static_cast<float>(hit.y),
+                            static_cast<float>(hit.w), static_cast<float>(hit.h),
+                            static_cast<float>(theme::radius::chip),
+                            on ? theme::color::accent : theme::color::hair,
+                            on ? theme::alpha::chip_on : theme::alpha::chip_off);
+      draw::label(g, mono, on ? theme::color::accent : theme::color::paper, theme::alpha::text,
+                  static_cast<float>(hit.x + theme::space::md), static_cast<float>(hit.y + 3),
+                  text.c_str());
+    };
+
+    for (const auto& h : settings_hits()) {
+      if (std::strcmp(h.id, "cam") == 0) chip(h, L"Camera  Auto", false);
+      else if (std::strcmp(h.id, "hud") == 0)
+        chip(h, cfg_->hud.enabled ? L"HUD  on" : L"HUD  off", cfg_->hud.enabled);
+      else if (std::strcmp(h.id, "chips") == 0)
+        chip(h, cfg_->hud.chips ? L"Chips  on" : L"Chips  off", cfg_->hud.chips);
+      else if (std::strcmp(h.id, "mirror") == 0)
+        chip(h, cfg_->mirror ? L"Mirror  on" : L"Mirror  off", cfg_->mirror);
+      else if (std::strcmp(h.id, "reset") == 0)
+        chip(h, L"Reset HUD position", false);
+      else if (std::strcmp(h.id, "box") == 0) {
+        draw::label(g, label, theme::color::dim, theme::alpha::muted, static_cast<float>(h.x),
+                    static_cast<float>(h.y - 16), L"Control box");
+        draw::fill_round_rect(g, static_cast<float>(h.x), static_cast<float>(h.y),
+                              static_cast<float>(h.w), static_cast<float>(h.h),
+                              static_cast<float>(theme::radius::chip), theme::color::hair,
+                              theme::alpha::hair_dim);
+        const float t = (cfg_->control_box - 0.35f) / 0.55f;
+        draw::fill_round_rect(g, static_cast<float>(h.x), static_cast<float>(h.y),
+                              static_cast<float>(h.w) * std::clamp(t, 0.f, 1.f),
+                              static_cast<float>(h.h), static_cast<float>(theme::radius::chip),
+                              theme::color::accent, theme::alpha::slider);
+      } else if (std::strcmp(h.id, "open") == 0)
+        chip(h, L"Open config", false);
+      else if (std::strcmp(h.id, "done") == 0)
+        chip(h, L"Done", true);
+    }
+    (void)micro;
+  }
+
   Config* cfg_ = nullptr;
   std::function<void(const Config&)> cb_;
   HWND hwnd_ = nullptr;
-  HWND hud_ = nullptr;
-  HWND chips_ = nullptr;
-  HWND mirror_ = nullptr;
+  ULONG_PTR gdiplus_token_ = 0;
   bool visible_ = false;
 };
 

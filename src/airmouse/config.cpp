@@ -36,7 +36,10 @@ json to_json(const Config& cfg) {
       {"hud",
        {{"enabled", cfg.hud.enabled},
         {"chips", cfg.hud.chips},
-        {"show_camera", cfg.hud.show_camera}}},
+        {"show_camera", cfg.hud.show_camera},
+        {"placed", cfg.hud.placed},
+        {"x", cfg.hud.x},
+        {"y", cfg.hud.y}}},
       {"gestures",
        {{"left_pinch", cfg.gestures.left_pinch},
         {"right_pinch", cfg.gestures.right_pinch},
@@ -72,6 +75,9 @@ void merge(Config& cfg, const json& j) {
     if (h.contains("enabled")) cfg.hud.enabled = h["enabled"].get<bool>();
     if (h.contains("chips")) cfg.hud.chips = h["chips"].get<bool>();
     if (h.contains("show_camera")) cfg.hud.show_camera = h["show_camera"].get<bool>();
+    if (h.contains("placed")) cfg.hud.placed = h["placed"].get<bool>();
+    if (h.contains("x")) cfg.hud.x = h["x"].get<int>();
+    if (h.contains("y")) cfg.hud.y = h["y"].get<int>();
   }
   if (j.contains("gestures")) {
     const auto& g = j["gestures"];

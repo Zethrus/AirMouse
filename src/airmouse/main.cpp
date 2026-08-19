@@ -63,6 +63,16 @@ int main(int argc, char** argv) {
             << "  assets=" << airmouse::asset_root().string() << '\n';
 
   auto overlay = airmouse::create_overlay();
+  overlay->set_placement(cfg.hud);
+  overlay->set_on_moved([&](airmouse::HudConfig next) {
+    cfg.hud.placed = next.placed;
+    cfg.hud.x = next.x;
+    cfg.hud.y = next.y;
+    try {
+      airmouse::save_config(cfg_path, cfg);
+    } catch (...) {
+    }
+  });
   if (cfg.hud.enabled) {
     if (!overlay->create()) {
       std::cerr << "overlay: failed to create window\n";
@@ -121,6 +131,7 @@ int main(int argc, char** argv) {
   settings->set_on_change([&](const airmouse::Config& next) {
     cfg = next;
     tracker.set_config(cfg);
+    overlay->set_placement(cfg.hud);
     if (cfg.hud.enabled) {
       overlay->create();
       overlay->set_visible(true);
